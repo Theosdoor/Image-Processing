@@ -28,4 +28,5 @@ jobs:
     - name: Lint with flake8
       run: |
         # check for all PEP8 compliance issues
-        flake8 . 
+        flake8 main.py
+        

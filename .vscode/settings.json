@@ -1,3 +1,7 @@
 {
-    "python.analysis.typeCheckingMode": "basic"
+    "python.analysis.typeCheckingMode": "basic",
+    "files.watcherExclude": {
+        "**/image_processing_files/**": true
+    }
 }
+
