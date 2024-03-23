@@ -55,7 +55,10 @@ def match_circles(image):
     return image
 
 def process_image(image):
-    rows, cols, ch = image.shape
+    # greyscale
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    rows, cols = image.shape
     # # define size of circle
     # width = image.shape[1]
     # height = image.shape[0]
@@ -66,58 +69,58 @@ def process_image(image):
     # cv2.circle(black_circle, (int(width / 2), int(height / 2)),
     #            radius, (0, 0, 0), -1)
 
-    # pad image with border
-    border_size = 6
-    image = cv2.copyMakeBorder(image, border_size, border_size, border_size, border_size, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+    # # pad image with border
+    # border_size = 6
+    # image = cv2.copyMakeBorder(image, border_size, border_size, border_size, border_size, cv2.BORDER_CONSTANT, value=[0, 0, 0])
 
-    mask = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    mask = image.copy()
 
     # isolate black circle by thresholding
     mask = cv2.inRange(mask, 0, 10)
 
-    # sharpen mask edges using laplacian
-    mask = cv2.Laplacian(mask, cv2.CV_8U)
+    # laplaciam edge detection
+    # mask = cv2.Laplacian(mask, cv2.CV_8U, ksize=7)
+    mask = cv2.Canny(mask, 100, 300)
+
+
+
+    # hough lines
+    lines = cv2.HoughLinesP(mask, .5, np.pi / 180, 50, minLineLength=140, maxLineGap=500)
+    line_mask = np.zeros((rows, cols), np.uint8)
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        cv2.line(line_mask, (x1, y1), (x2, y2), 255, 2)
+
+    mask = line_mask
 
     # get 4 corners of black square
     corners = cv2.goodFeaturesToTrack(mask, 4, 0.01, 10)
     corners = corners.reshape(4, 2)
 
-    # get centers
-    print(corners)
-    # coord = (xmin, ymin, xmax, ymax)
-    coord = (corners[0][1], corners[1][1], corners[2][0], corners[3][1])
-    centerCoord = (coord[0]+(coord[2]/2), coord[1]+(coord[3]/2))
-    print(centerCoord)
-    print(mask.shape[0] / 2, mask.shape[1] / 2)
+    map_to = [[0, 0], [cols, 0], [0, rows], [cols, rows]]  # 4 corners of new image
+    map_from = [[0, 0]] * 4  # to store 4 corners of ROI
 
-    xshift = mask.shape[0] / 2 - centerCoord[0]
-    yshift = mask.shape[1] / 2 - centerCoord[1]
+    # sort corners of ROI to align with corners of frame
+    for i in range(len(map_to)):
+        min_dist = 1000000
+        for c in corners:
+            dist = np.linalg.norm(c - map_to[i])
+            if dist < min_dist:
+                min_dist = dist
+                map_from[i] = c
 
-    shift = np.full(image.shape, [xshift, yshift, 0])
-
-    # add shift to every element in image matrix
-    image = np.add(image, shift)
-
-    # put red circles on object corners
-    mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+    # put coloured circles on object corners on image
+    image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     corners = corners.astype(np.int32)  # convert to integers
-    for i in corners:
-        x, y = i.ravel()
-        cv2.circle(image, (x, y), 3, (0, 0, 255), -1)
-
-    # put circle in middle of image
-    cv2.circle(image, (int(image.shape[1] / 2), int(image.shape[0] / 2)), 3, (0, 0, 255), -1)
+    colours = [(0, 255, 255), (0, 255, 0), (0, 0, 255), (255, 255, 0)] # yellow, green, red, cyan
+    for i in range(len(corners)):
+        x, y = corners[i].ravel()
+        cv2.circle(image, (x, y), 3, colours[i], -1)
 
     # shift perspective
-    pts1 = np.float32(corners)  # 4 corners of black square
-    pts2 = np.float32([[0, 0], [cols, 0], [0, rows], [cols, rows]])  # 4 corners of new image
-
-    M = cv2.getPerspectiveTransform(pts1, pts2)
+    M = cv2.getPerspectiveTransform(np.float32(map_from), np.float32(map_to))
 
     image = cv2.warpPerspective(image, M, (cols, rows))
-
-    
-
 
     # # apply fft to mask
     # rows, cols = mask.shape
@@ -166,11 +169,29 @@ def process_image(image):
     # image = cv2.convertScaleAbs(image, alpha = gain, beta = bias)
 
 
+    # false colour mapping to greyscale
+    # image = cv2.applyColorMap(image, cv2.COLORMAP_JET)
+
+    # create template containing red 'R'
+    template_size = 100
+    template = np.zeros((template_size, template_size, 3), np.uint8)
+    cv2.putText(template, 'R', (template_size // 2, template_size // 2), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 255), thickness = 1)
+
+    # mask = template
+
+    cv2.imwrite(os.path.join('Results', 'mask.png'), mask)
     return image
 
 
-# FOR TEST: dictionary matching image name to image matrix
-images = {}
+# TESTING ======================================================================
+# test image
+isTesting = True
+healthy = 'im001-healthy.jpg'
+edge_healthy = 'im014-healthy.jpg'
+pneumonia = 'im054-pneumonia.jpg'
+
+img_name = pneumonia
+# TESTING ======================================================================
 
 # load images & process
 for tag in os.listdir(path_to_images):
@@ -178,34 +199,16 @@ for tag in os.listdir(path_to_images):
         # if not jpeg file then skip over it (eg .DS_Store file)
         continue
 
+    # FOR TEST
+    if tag != img_name and isTesting:
+        continue
+
     img_path = os.path.join(path_to_images, tag)
     img_loaded = cv2.imread(img_path, cv2.IMREAD_COLOR)
 
-    # FOR ALL IMAGES
-    # processed = process_image(img_loaded)
-    # cv2.imwrite(os.path.join('Results', tag), processed)
-
-    # FOR TEST IMAGES
-    images[tag] = img_loaded
-
-# ==============================================================================
-# TESTING (DELETE LATER)
-# exit("Finished.")
-
-# test image
-healthy = 'im003-healthy.jpg'
-pneumonia = 'im053-pneumonia.jpg'
-
-img_name = healthy
-
-# load image
-image = images[img_name]
-
-# check it has loaded
-if not image is None:
-    image = process_image(image)
-
-    # save processed image into Results directory under same filename
-    cv2.imwrite(os.path.join('Results', img_name), image)
-else:
-    print("No image file was loaded.")
+    # check it has loaded
+    if not img_loaded is None:
+        processed = process_image(img_loaded)
+        cv2.imwrite(os.path.join('Results', tag), processed)
+    else:
+        print(tag + " failed to load.")
