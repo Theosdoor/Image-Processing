@@ -31,7 +31,7 @@ parser.add_argument(
     "--data",
     type=str,
     help="specify path to the images",
-    default='xray_images')
+    default='../Results') # changed from xray_images
 
 parser.add_argument(
     "--model",

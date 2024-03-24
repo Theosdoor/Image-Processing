@@ -79,22 +79,20 @@ def process_image(image):
     mask = cv2.inRange(mask, 0, 10)
 
     # laplaciam edge detection
-    # mask = cv2.Laplacian(mask, cv2.CV_8U, ksize=7)
-    mask = cv2.Canny(mask, 100, 300)
+    mask = cv2.Laplacian(mask, cv2.CV_8U, ksize=7)
+    # mask = cv2.Canny(mask, 100, 300)
 
+    # extract contours to get seperate mask of circle and square
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+    square_mask = np.zeros((rows, cols), np.uint8)
+    circle_mask = mask.copy()
 
-    # hough lines
-    lines = cv2.HoughLinesP(mask, .5, np.pi / 180, 50, minLineLength=140, maxLineGap=500)
-    line_mask = np.zeros((rows, cols), np.uint8)
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
-        cv2.line(line_mask, (x1, y1), (x2, y2), 255, 2)
-
-    mask = line_mask
+    cv2.drawContours(square_mask, contours, -1, (255, 255, 255), 1)
+    cv2.drawContours(circle_mask, contours, -1, (0, 0, 0), 1)
 
     # get 4 corners of black square
-    corners = cv2.goodFeaturesToTrack(mask, 4, 0.01, 10)
+    corners = cv2.goodFeaturesToTrack(square_mask, 4, 0.01, 10)
     corners = corners.reshape(4, 2)
 
     map_to = [[0, 0], [cols, 0], [0, rows], [cols, rows]]  # 4 corners of new image
@@ -110,16 +108,15 @@ def process_image(image):
                 map_from[i] = c
 
     # put coloured circles on object corners on image
-    image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-    corners = corners.astype(np.int32)  # convert to integers
-    colours = [(0, 255, 255), (0, 255, 0), (0, 0, 255), (255, 255, 0)] # yellow, green, red, cyan
-    for i in range(len(corners)):
-        x, y = corners[i].ravel()
-        cv2.circle(image, (x, y), 3, colours[i], -1)
+    # image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    # corners = corners.astype(np.int32)  # convert to integers
+    # colours = [(0, 255, 255), (0, 255, 0), (0, 0, 255), (255, 255, 0)] # yellow, green, red, cyan
+    # for i in range(len(corners)):
+    #     x, y = corners[i].ravel()
+    #     cv2.circle(image, (x, y), 3, colours[i], -1)
 
     # shift perspective
-    M = cv2.getPerspectiveTransform(np.float32(map_from), np.float32(map_to))
-
+    M = cv2.getPerspectiveTransform(np.array(map_from, np.float32), np.array(map_to, np.float32))
     image = cv2.warpPerspective(image, M, (cols, rows))
 
     # # apply fft to mask
@@ -177,7 +174,7 @@ def process_image(image):
     template = np.zeros((template_size, template_size, 3), np.uint8)
     cv2.putText(template, 'R', (template_size // 2, template_size // 2), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 255), thickness = 1)
 
-    # mask = template
+    mask = template
 
     cv2.imwrite(os.path.join('Results', 'mask.png'), mask)
     return image
@@ -187,10 +184,11 @@ def process_image(image):
 # test image
 isTesting = True
 healthy = 'im001-healthy.jpg'
+healthy5 = 'im005-healthy.jpg'
 edge_healthy = 'im014-healthy.jpg'
 pneumonia = 'im054-pneumonia.jpg'
 
-img_name = pneumonia
+img_name = healthy5
 # TESTING ======================================================================
 
 # load images & process
