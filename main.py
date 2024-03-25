@@ -14,7 +14,7 @@ except:
 if not os.path.isdir('Results'):
     os.mkdir('Results')
 
-refreshResults = True
+refreshResults = False
 
 # delete contents of results directory if wanted
 if refreshResults:
@@ -98,6 +98,11 @@ def remove_R(image):
 
     return image
 
+def conservative_smoothing(image):
+    # from linked towards data science article
+    temp = []
+    indexer = filter_size // 2
+    new_image
 
 def process_image(image):
     height, width = image.shape[:2]
@@ -108,6 +113,16 @@ def process_image(image):
     # fix warped perspective
     image = fix_perspective(image, square_mask)
 
+    # histogram equalisation
+    # convert to hsv colour space
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+    # apply histogram equalisation to V channel
+    image[:, :, 2] = cv2.equalizeHist(image[:, :, 2])
+
+    # convert back to BGR
+    image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
+
     # create mask using thresholding for missing circle region
     thresh = 60
     mask = cv2.inRange(image, (0, 0, 0), (thresh, thresh, thresh))
@@ -116,23 +131,16 @@ def process_image(image):
     image = cv2.inpaint(image, mask, 9, cv2.INPAINT_NS)
 
     # remove red 'R' from image
-    image = remove_R(image)
-    
+    # image = remove_R(image)
+
+    # remove salt and pepper noise with conservative smoothing
+
+
     # greyscale
     # image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     # non local means filtering (https://docs.opencv.org/3.4/d5/d69/tutorial_py_non_local_means.html)
-    # image = cv2.fastNlMeansDenoising(image, None, 10, 7, 21)
-
-    # hisogram equalisation (copilot)
-    # convert to hsv colour space
-    # image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-
-    # # apply histogram equalisation to the V channel
-    # image[:, :, 2] = cv2.equalizeHist(image[:, :, 2])
-
-    # # convert back to BGR
-    # image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
+    # image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
 
     # make brighter (copilot)
     # gain = 1.2
