@@ -5,6 +5,35 @@ import numpy as np
 
 path_to_images = 'image_processing_files/xray_images'
 
+def get_circle_square_masks(image):
+    '''
+    create seperate masks for xray image outline (square) and missing region outline (circle)
+    '''
+
+    height, width = image.shape[:2]
+
+    mask = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # isolate image and missing region outlines
+    mask = cv2.inRange(mask, 0, 10)
+
+    # laplaciam edge detection
+    mask = cv2.Laplacian(mask, cv2.CV_8U, ksize=7)
+    # mask = cv2.Canny(mask, 100, 300)
+
+    # extract contours (only need extreme outer contours)
+    contours, _ = cv2.findContours(mask, mode = cv2.RETR_EXTERNAL, method = cv2.CHAIN_APPROX_SIMPLE)
+    # method stores only contour endpoints rather than all points on contour
+
+    # create seperate masks for xray image outline (square) and missing region outline (circle)
+    square_mask = np.zeros((height, width), np.uint8)
+    circle_mask = mask.copy()
+
+    cv2.drawContours(square_mask, contours, -1, (255, 255, 255), 1)
+    cv2.drawContours(circle_mask, contours, -1, (0, 0, 0), -1)
+
+    return circle_mask, square_mask
+
 def show_circles(image):
     # use HoughCircles to find circles in image (opencv docs)
     # find black circle in image
