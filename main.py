@@ -3,6 +3,7 @@ import os
 
 import cv2
 import numpy as np
+import math
 
 try:
     path_to_images = sys.argv[1] # path given as command line argument
@@ -21,6 +22,7 @@ if refreshResults:
     for file in os.listdir('Results'):
         os.remove(os.path.join('Results', file))
 
+# helper functions
 def fix_perspective(image):
     height, width = image.shape[:2]
 
@@ -216,6 +218,118 @@ def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 
 
     return src
 
+def create_band_pass_filter(width, height, radius_small, radius_big):
+    '''
+    from amir github
+    '''
+    assert(radius_big > radius_small)
+
+    bp_filter = np.ones((height, width, 2), np.float32)
+    cv2.circle(bp_filter, (int(width / 2), int(height / 2)),
+               radius_big, (0, 0, 0), thickness=-1)
+
+    cv2.circle(bp_filter, (int(width / 2), int(height / 2)),
+               radius_small, (1, 1, 1), thickness=-1)
+
+    return bp_filter
+
+def create_butterworth_high_pass_filter(width, height, d, n):
+    hp_filter = np.zeros((height, width, 2), np.float32)
+    centre = (width / 2, height / 2)
+
+    for i in range(0, hp_filter.shape[1]):  # image width
+        for j in range(0, hp_filter.shape[0]):  # image height
+            radius = max(1, math.sqrt(math.pow((i - centre[0]), 2.0) + math.pow((j - centre[1]), 2.0)))
+            hp_filter[j, i] = 1 / (1 + math.pow((d / radius), (2 * n)))
+    return hp_filter
+
+def create_butterworth_low_pass_filter(width, height, d, n):
+    lp_filter = np.zeros((height, width, 2), np.float32)
+    centre = (width / 2, height / 2)
+
+    for i in range(0, lp_filter.shape[1]):  # image width
+        for j in range(0, lp_filter.shape[0]):  # image height
+            radius = max(1, math.sqrt(math.pow((i - centre[0]), 2.0) + math.pow((j - centre[1]), 2.0)))
+            lp_filter[j, i] = 1 / (1 + math.pow((radius / d), (2 * n)))
+    return lp_filter
+
+def create_butterworth_bp_filter(width, height, n, d0, d1):
+    bp_filter = np.zeros((height, width, 2), np.float32)
+    centre = (width / 2, height / 2)
+
+    for i in range(0, bp_filter.shape[1]):  # image width
+        for j in range(0, bp_filter.shape[0]):  # image height
+            break
+
+    return bp_filter
+
+def band_pass(image, radius_small, radius_big):
+    '''
+    from amir github
+    '''
+    assert(radius_big > radius_small)
+
+    grey_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    height, width = grey_image.shape[:2]
+
+    # set up optimized DFT settings
+    nheight = cv2.getOptimalDFTSize(height)
+    nwidth = cv2.getOptimalDFTSize(width)
+
+    pad_right = nwidth - width
+    pad_bottom = nheight - height
+    nframe = cv2.copyMakeBorder(
+        grey_image,
+        0,
+        pad_bottom,
+        0,
+        pad_right,
+        cv2.BORDER_CONSTANT,
+        value=0)
+
+    # perform the DFT and get complex output
+    dft = cv2.dft(np.float32(nframe), flags=cv2.DFT_COMPLEX_OUTPUT)
+
+    dft_shifted = np.fft.fftshift(dft)
+
+    # do the filtering
+    bp_filter = create_band_pass_filter(nwidth, nheight, radius_small, radius_big)
+
+    dft_filtered = cv2.mulSpectrums(dft_shifted, bp_filter, flags=0)
+
+    dft = np.fft.fftshift(dft_filtered)
+
+    filtered_img = cv2.dft(dft, flags=cv2.DFT_INVERSE)
+
+    # normalized the filtered image into 0 -> 255 (8-bit grayscale) so we
+    # can see the output
+    min_val, max_val, min_loc, max_loc = \
+        cv2.minMaxLoc(filtered_img[:, :, 0])
+    filtered_img_normalised = filtered_img[:, :, 0] * (
+        1.0 / (max_val - min_val)) + ((-min_val) / (max_val - min_val))
+    filtered_img_normalised = np.uint8(filtered_img_normalised * 255)
+
+    # # calculate the magnitude spectrum and log transform + scale it for
+    # # visualization
+    # magnitude_spectrum = np.log(cv2.magnitude(
+    #         dft_filtered[:, :, 0], dft_filtered[:, :, 1]))
+    
+    # # create a 8-bit image to put the magnitude spectrum into
+    # magnitude_spectrum_normalised = np.zeros((nheight, nwidth, 1), np.uint8)
+
+    # # normalized the magnitude spectrum into 0 -> 255 (8-bit grayscale) so
+    # # we can see the output
+    # cv2.normalize(
+    #         np.uint8(magnitude_spectrum),
+    #         magnitude_spectrum_normalised,
+    #         alpha=0,
+    #         beta=255,
+    #         norm_type=cv2.NORM_MINMAX)
+
+    return cv2.cvtColor(filtered_img_normalised, cv2.COLOR_GRAY2BGR)#, cv2.cvtColor(magnitude_spectrum_normalised, cv2.COLOR_GRAY2BGR)
+
+# Main function
 def process_image(image):
     '''
     Process xray image. Keeps same resolution.
@@ -224,17 +338,17 @@ def process_image(image):
     image = fix_perspective(image)
 
     # greyscale
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     # create mask using thresholding for missing circle region
     # mask = cv2.inRange(image, 30, 230)
     # mask = cv2.bitwise_not(mask)
-    mask = cv2.inRange(image, 0, 10)
+    # mask = cv2.inRange(image, 0, 10)
 
     # inpaint using circle mask
     # image = cv2.inpaint(image, mask, 9, cv2.INPAINT_NS)
-    image = criminisi_inpaint(image, mask)
-    return image
+    # image = criminisi_inpaint(image, mask)
+    # return image
 
     # remove red 'R' from image
     # image = remove_R(image)
@@ -244,8 +358,8 @@ def process_image(image):
     # image = cv2.medianBlur(image, 3)
 
     # non local means filtering (https://docs.opencv.org/3.4/d5/d69/tutorial_py_non_local_means.html)
-    image = cv2.fastNlMeansDenoising(image, None, 10, 7, 21)
-    # image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
+    # image = cv2.fastNlMeansDenoising(image, None, 10, 7, 21)
+    image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
 
     # clahe
     # clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
@@ -261,13 +375,16 @@ def process_image(image):
     # image = colour_transfer(temp, image)
 
     # histogram equalisation in l*a*b* colour space
-    # image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    # l, a, b = cv2.split(image)
-    # # l = cv2.equalizeHist(l)
-    # clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
-    # l = clahe.apply(l)
-    # image = cv2.merge([l, a, b])
-    # image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(image)
+    # l = cv2.equalizeHist(l)
+    clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
+    l = clahe.apply(l)
+    image = cv2.merge([l, a, b])
+    image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
+
+    # band pass filter
+    image = band_pass(image, 30, 50)
 
     return image
 
