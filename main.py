@@ -160,10 +160,7 @@ def colour_transfer(src, dst):
 def colour_map(grey_img):
     pass
 
-def criminisi_compute_confidence(src, target):
-    pass
-
-def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 1000):
+class crimini_inpainter:
     '''
     from https://ieeexplore.ieee.org/document/1323101
 
@@ -173,6 +170,24 @@ def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 
     target (Omega) = region to be removed and filled.
         Binary mask, same size as src, with region to be filled = 1, 0 elsewhere
     '''
+    def __init__(self, src, target, patch_size = 9, search_size = 15, max_iter = 1000) -> None:
+        self.phi = src
+        self.omega = target
+        self.patch_size = patch_size
+        self.search_size = search_size
+        self.max_iter = max_iter
+
+        # confidence values for each pixel
+        # initialised at 1 for missing region, 0 for known region
+        # i.e. 1 - binary target mask
+        self.C = 1.0 - self.omega
+        # data values for each pixel
+        self.D = np.zeros(self.phi.shape[:2], np.uint8)
+        # priority values for each pixel
+        self.P = np.zeros(self.phi.shape[:2], np.uint8)
+        self.fill_front = None
+
+def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 1000):
     height, width = src.shape[:2]
     mask = target.copy()
 
@@ -187,25 +202,22 @@ def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 
     
     # repeat until region filled
     for it in range(max_iter):
-        # identify fill front
+        # identify fill front and filter out negative values
         # fill_front = cv2.Canny(target, 100, 200)
         fill_front = cv2.Laplacian(mask, cv2.CV_8U, ksize=3)
+        # fill_front = np.clip(fill_front, 0, 1)
 
         # if fill front empty, break
         if np.sum(fill_front) == 0:
             break
 
-        # update priorities for each pixel in fill front
+        # update priorities for pixels in fill front
         for i in range(height):
             for j in range(width):
                 # if pixel in fill front
                 if fill_front[i, j] != 0:
                     # compute priority
                     P[i, j] = C[i, j] * D[i, j]
-
-
-
-
 
 
     return src
@@ -339,14 +351,13 @@ def process_image(image):
     # grey_img = cv2.inpaint(grey_img, grey_mask, 9, cv2.INPAINT_NS)
     # image = cv2.inpaint(image, colour_mask, 9, cv2.INPAINT_NS)
     image = criminisi_inpaint(image, colour_mask)
-    
+
     # remove s&p noise
     # grey_img = conservative_smoothing(grey_img, 5)
     # grey_img = cv2.medianBlur(grey_img, 3)
 
-
     # band pass filter
-    # grey_img, magnitude_spectrum = band_pass(grey_img, 1, 200)
+    # image, magnitude_spectrum = band_pass(grey_img, 1, 20)
 
     # remove red 'R' from image
     # image = remove_R(image)
