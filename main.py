@@ -58,13 +58,6 @@ def fix_perspective(image):
             if dist < min_dist:
                 min_dist = dist
                 map_from[i] = c
-
-    # put coloured circles on object corners on image
-    # corners = corners.astype(np.int32)  # convert to integers
-    # colours = [(0, 255, 255), (0, 255, 0), (0, 0, 255), (255, 255, 0)] # yellow, green, red, cyan
-    # for i in range(len(corners)):
-    #     x, y = corners[i].ravel()
-    #     cv2.circle(image, (x, y), 3, colours[i], -1)
     
     # shift perspective
     M = cv2.getPerspectiveTransform(np.array(map_from, np.float32), np.array(map_to, np.float32))
@@ -164,7 +157,10 @@ def colour_transfer(src, dst):
 
     return transfer
 
-def ciminisi_compute_confidence(src, target):
+def colour_map(grey_img):
+    pass
+
+def criminisi_compute_confidence(src, target):
     pass
 
 def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 1000):
@@ -174,36 +170,32 @@ def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 
     INPUTS:
     =======
     src (Phi) = source region for inpainting
-    target (Omega) = region to be removed and filled
+    target (Omega) = region to be removed and filled.
+        Binary mask, same size as src, with region to be filled = 1, 0 elsewhere
     '''
     height, width = src.shape[:2]
+    mask = target.copy()
 
     # confidence values for each pixel
-    C = np.zeros((height, width), np.uint8)
+    # initialised at 1 for missing region, 0 for known region
+    # i.e. 1 - binary target mask
+    C = (1-target).astype(np.float32)
     # data values for each pixel
     D = np.zeros((height, width), np.uint8)
-    #  priority values for each pixel
+    # priority values for each pixel
     P = np.zeros((height, width), np.uint8)
-
-    # initialise confidence values: 1 for missing region, 0 for known region
-    for i in range(height):
-        for j in range(width):
-            # C = 1 if pixel not in target region
-            if target[i, j] == 0:
-                C[i, j] = 1
     
     # repeat until region filled
-    while True and max_iter > 0:
-        max_iter -= 1
-
+    for it in range(max_iter):
         # identify fill front
-        fill_front = cv2.Canny(target, 100, 200)
+        # fill_front = cv2.Canny(target, 100, 200)
+        fill_front = cv2.Laplacian(mask, cv2.CV_8U, ksize=3)
 
         # if fill front empty, break
         if np.sum(fill_front) == 0:
             break
 
-        # computer priorities for each pixel in fill front
+        # update priorities for each pixel in fill front
         for i in range(height):
             for j in range(width):
                 # if pixel in fill front
@@ -263,33 +255,19 @@ def create_butterworth_bp_filter(width, height, n, d0, d1):
 
     return bp_filter
 
-def band_pass(image, radius_small, radius_big):
+def band_pass(grey_img, radius_small, radius_big):
     '''
     from amir github
     '''
     assert(radius_big > radius_small)
-
-    grey_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    height, width = grey_image.shape[:2]
+    height, width = grey_img.shape[:2]
 
     # set up optimized DFT settings
     nheight = cv2.getOptimalDFTSize(height)
     nwidth = cv2.getOptimalDFTSize(width)
 
-    pad_right = nwidth - width
-    pad_bottom = nheight - height
-    nframe = cv2.copyMakeBorder(
-        grey_image,
-        0,
-        pad_bottom,
-        0,
-        pad_right,
-        cv2.BORDER_CONSTANT,
-        value=0)
-
     # perform the DFT and get complex output
-    dft = cv2.dft(np.float32(nframe), flags=cv2.DFT_COMPLEX_OUTPUT)
+    dft = cv2.dft(np.float32(grey_img), flags=cv2.DFT_COMPLEX_OUTPUT)
 
     dft_shifted = np.fft.fftshift(dft)
 
@@ -298,9 +276,9 @@ def band_pass(image, radius_small, radius_big):
 
     dft_filtered = cv2.mulSpectrums(dft_shifted, bp_filter, flags=0)
 
-    dft = np.fft.fftshift(dft_filtered)
+    inv_dft = np.fft.fftshift(dft_filtered)
 
-    filtered_img = cv2.dft(dft, flags=cv2.DFT_INVERSE)
+    filtered_img = cv2.dft(inv_dft, flags=cv2.DFT_INVERSE)
 
     # normalized the filtered image into 0 -> 255 (8-bit grayscale) so we
     # can see the output
@@ -310,24 +288,25 @@ def band_pass(image, radius_small, radius_big):
         1.0 / (max_val - min_val)) + ((-min_val) / (max_val - min_val))
     filtered_img_normalised = np.uint8(filtered_img_normalised * 255)
 
-    # # calculate the magnitude spectrum and log transform + scale it for
-    # # visualization
-    # magnitude_spectrum = np.log(cv2.magnitude(
-    #         dft_filtered[:, :, 0], dft_filtered[:, :, 1]))
+    # calculate the magnitude spectrum and log transform + scale it for
+    # visualization
+    magnitude_spectrum = cv2.magnitude(dft_filtered[:, :, 0], dft_filtered[:, :, 1])
+    magnitude_spectrum += .4 # avoid log(0)
+    magnitude_spectrum = np.log(magnitude_spectrum)
     
-    # # create a 8-bit image to put the magnitude spectrum into
-    # magnitude_spectrum_normalised = np.zeros((nheight, nwidth, 1), np.uint8)
+    # create a 8-bit image to put the magnitude spectrum into
+    magnitude_spectrum_normalised = np.zeros((nheight, nwidth, 1), np.uint8)
 
-    # # normalized the magnitude spectrum into 0 -> 255 (8-bit grayscale) so
-    # # we can see the output
-    # cv2.normalize(
-    #         np.uint8(magnitude_spectrum),
-    #         magnitude_spectrum_normalised,
-    #         alpha=0,
-    #         beta=255,
-    #         norm_type=cv2.NORM_MINMAX)
+    # normalized the magnitude spectrum into 0 -> 255 (8-bit grayscale) so
+    # we can see the output
+    cv2.normalize(
+            np.uint8(magnitude_spectrum),
+            magnitude_spectrum_normalised,
+            alpha=0,
+            beta=255,
+            norm_type=cv2.NORM_MINMAX)
 
-    return cv2.cvtColor(filtered_img_normalised, cv2.COLOR_GRAY2BGR)#, cv2.cvtColor(magnitude_spectrum_normalised, cv2.COLOR_GRAY2BGR)
+    return filtered_img_normalised, magnitude_spectrum_normalised
 
 # Main function
 def process_image(image):
@@ -337,54 +316,50 @@ def process_image(image):
     # fix warped perspective
     image = fix_perspective(image)
 
+    # histogram equalisation in l*a*b* colour space
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(image)
+
+    clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
+    # l = clahe.apply(l)
+
+    image = cv2.merge([l, a, b])
+    image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
+
     # greyscale
-    # image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    grey_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     # create mask using thresholding for missing circle region
     # mask = cv2.inRange(image, 30, 230)
     # mask = cv2.bitwise_not(mask)
-    # mask = cv2.inRange(image, 0, 10)
+    # grey_mask = cv2.inRange(grey_img, 0, 10)
+    colour_mask = cv2.inRange(image, (0, 0, 0), (10, 10, 10))
 
     # inpaint using circle mask
-    # image = cv2.inpaint(image, mask, 9, cv2.INPAINT_NS)
-    # image = criminisi_inpaint(image, mask)
-    # return image
+    # grey_img = cv2.inpaint(grey_img, grey_mask, 9, cv2.INPAINT_NS)
+    # image = cv2.inpaint(image, colour_mask, 9, cv2.INPAINT_NS)
+    image = criminisi_inpaint(image, colour_mask)
+    
+    # remove s&p noise
+    # grey_img = conservative_smoothing(grey_img, 5)
+    # grey_img = cv2.medianBlur(grey_img, 3)
+
+
+    # band pass filter
+    # grey_img, magnitude_spectrum = band_pass(grey_img, 1, 200)
 
     # remove red 'R' from image
     # image = remove_R(image)
 
-    # remove s&p noise
-    # image = conservative_smoothing(image, 5)
-    # image = cv2.medianBlur(image, 3)
-
     # non local means filtering (https://docs.opencv.org/3.4/d5/d69/tutorial_py_non_local_means.html)
-    # image = cv2.fastNlMeansDenoising(image, None, 10, 7, 21)
-    image = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
-
-    # clahe
-    # clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
-    # image = clahe.apply(image)
-
-    # make brighter (copilot)
-    # gain = 1.2
-    # bias = 0
-    # image = cv2.convertScaleAbs(image, alpha = gain, beta = bias)
+    # grey_img = cv2.fastNlMeansDenoising(grey_img, None, 10, 7, 21)
+    # image = cv2.fastNlMeansDenoisingColored(image, None, h=8, hColor=10, templateWindowSize=7, searchWindowSize=21)
+    # use greyscale nlm on different colour channels w different h values
 
     # add false colour
-    # image = cv2.applyColorMap(image, cv2.COLORMAP_JET)
-    # image = colour_transfer(temp, image)
-
-    # histogram equalisation in l*a*b* colour space
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(image)
-    # l = cv2.equalizeHist(l)
-    clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
-    l = clahe.apply(l)
-    image = cv2.merge([l, a, b])
-    image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
-
-    # band pass filter
-    image = band_pass(image, 30, 50)
+    # colour_mapped = cv2.applyColorMap(grey_img, cv2.COLORMAP_JET)
+    # image = colour_transfer(image, colour_mapped)
+    # image = grey_img
 
     return image
 
