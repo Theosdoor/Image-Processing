@@ -16,7 +16,7 @@ except:
 if not os.path.isdir('Results'):
     os.mkdir('Results')
 
-refreshResults = True
+refreshResults = False
 
 # delete contents of results directory if wanted
 if refreshResults:
@@ -187,7 +187,7 @@ class Criminisi_Inpainter():
         self.working_image = np.copy(self.image)
         self.working_mask = np.copy(self.mask)
         self.front = np.zeros([self.iheight, self.iwidth])
-        
+
         # The confidence is initially the inverse of the mask, that is, the
         # target region is 0 and source region is 1.
         self.confidence = (1 - self.mask).astype(float)
@@ -610,19 +610,25 @@ def process_image(image):
     # fix warped perspective
     image = fix_perspective(image)
 
-    # set entire red channel = 0
-    image[:, :, 2] = 0
+    # convert to hsv space
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-    return image
+    # gamma correction on v channel
+    gamma = 2
+    image[:, :, 2] = np.power(image[:, :, 2] / 255.0, gamma) * 255.0
 
-    # show histogram of bgr channels
-    # import matplotlib.pyplot as plt
-    # colours = ['b', 'g', 'r']
-    # for i in range(3):
-    #     hist = cv2.calcHist([image], [i], None, [256], [0, 256])
-    #     plt.plot(hist, color=colours[i])
-    #     plt.xlim([0, 256])
-    # plt.savefig('Results/histogram_1.png')
+    # apply median blur to v channel
+    # image[:, :, 2] = cv2.medianBlur(image[:, :, 2], 3)
+
+    # sharpen edges
+    laplacian = cv2.Laplacian(image[:, :, 2], cv2.CV_8U)
+    # image[:, :, 2] = cv2.subtract(image[:, :, 2], laplacian)
+
+    # band pass filter on v channel
+    # image[:, :, 1], _ = band_pass(image[:, :, 1], 150, 250)
+
+    # convert back to bgr
+    image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
 
     # greyscale
     grey_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -637,29 +643,35 @@ def process_image(image):
     # image = criminisi_inpaint(image, colour_mask)
 
     inpainter = Criminisi_Inpainter(image, inpainting_mask, patch_size=15, verbose=False, show_progress=False)
-    image = inpainter.inpaint()
+    # image = inpainter.inpaint()
     
     # remove s&p
-    image = cv2.medianBlur(image, 3)
+    # image = cv2.medianBlur(image, 3)
 
     # remove gaussian noise
     # image = cv2.bilateralFilter(image, d=9, sigmaColor=70, sigmaSpace=150)
-    image = cv2.fastNlMeansDenoisingColored(image, None, h=10, hColor=10, templateWindowSize=11, searchWindowSize=21)
+    # image = cv2.fastNlMeansDenoisingColored(image, None, h=10, hColor=10, templateWindowSize=11, searchWindowSize=21)
 
-    # sharpen edges
-    # image = cv2.GaussianBlur(image, (3, 3), 0)
-    laplacian = cv2.Laplacian(image, cv2.CV_8U)
-    image = cv2.subtract(image, laplacian)
-
-    # histogram equalisation in l*a*b* colour space
+    # convert to l*a*b* colour space
     image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(image)
 
-    clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
-    l = clahe.apply(l)
+    # apply CLAHE to l channel
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    # l = clahe.apply(l)
 
+    # convert back to BGR
     image = cv2.merge([l, a, b])
     image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
+
+    # # show histogram of bgr channels
+    # import matplotlib.pyplot as plt
+    # colours = ['b', 'g', 'r']
+    # for i in range(3):
+    #     hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+    #     plt.plot(hist, color=colours[i])
+    #     plt.xlim([0, 256])
+    # plt.savefig('Results/histogram_2.png')
 
     # band pass filter
     # image, magnitude_spectrum = band_pass(grey_img, 1, 20)
@@ -691,7 +703,7 @@ pneumonia_56 = 'im056-pneumonia.jpg' # bad contrast
 pneumonia_74 = 'im074-pneumonia.jpg' # hard to see red R
 pneumonia_100 = 'im100-pneumonia.jpg'
 
-img_name = healthy_4
+img_name = healthy_1
 # TESTING ======================================================================
 
 # load images & process
