@@ -4,6 +4,7 @@ import os
 import cv2
 import numpy as np
 import math
+import time
 
 try:
     path_to_images = sys.argv[1] # path given as command line argument
@@ -94,14 +95,14 @@ def conservative_smoothing(image, kernel_size):
     temp = []
     indexer = kernel_size // 2 # keep track of distance either side of center pixel
     new_image = image.copy()
-    nrow, ncol = image.shape
+    nrow, ncol = image.shape[:2]
     
     for i in range(nrow): # for each pixel in row
         for j in range(ncol): # for each pixel in col
             for k in range(i-indexer, i+indexer+1): # for each pixel in kernel row (L-->R)
                 for m in range(j-indexer, j+indexer+1): # for each pixel in kernel col (T-->B)
-                    if (k > -1) and (k < nrow): # check in bounds of image
-                        if (m > -1) and (m < ncol): # check in bounds of image
+                    if (k >= 0) and (k < nrow): # check in bounds of image
+                        if (m >= 0) and (m < ncol): # check in bounds of image
                             temp.append(image[k,m]) # add to matrix of pixel values in neighbourhood
             temp.remove(image[i,j]) # ignore center pixel value
             
@@ -160,41 +161,295 @@ def colour_transfer(src, dst):
 def colour_map(grey_img):
     pass
 
-class crimini_inpainter:
+class Criminisi_Inpainter():
     '''
-    from https://ieeexplore.ieee.org/document/1323101
+    From https://github.com/igorcmoura/inpaint-object-remover/blob/master/inpainter/inpainter.py.
+    Adapted to use opencv rather than scipy and skimage.
 
-    INPUTS:
-    =======
-    src (Phi) = source region for inpainting
-    target (Omega) = region to be removed and filled.
-        Binary mask, same size as src, with region to be filled = 1, 0 elsewhere
+    Requires binary mask of missing region, same size as image.
+        Pixels values: 1 for missing, 0 for known region.
     '''
-    def __init__(self, src, target, patch_size = 9, search_size = 15, max_iter = 1000) -> None:
-        self.phi = src
-        self.omega = target
+    def __init__(self, image, mask, patch_size=9, verbose=False, show_progress=False):
+        self.image = image.astype('uint8')
+        self.mask = mask.round().astype('uint8')
         self.patch_size = patch_size
-        self.search_size = search_size
-        self.max_iter = max_iter
+        self.iheight, self.iwidth = self.image.shape[:2]
+        self.verbose = verbose
+        self.show_progress = show_progress
 
-        # confidence values for each pixel
-        # initialised at 1 for missing region, 0 for known region
-        # i.e. 1 - binary target mask
-        self.C = 1.0 - self.omega
-        # data values for each pixel
-        self.D = np.zeros(self.phi.shape[:2], np.uint8)
-        # priority values for each pixel
-        self.P = np.zeros(self.phi.shape[:2], np.uint8)
-        self.fill_front = None
+        # Non-initialized attributes
+        self.working_image = np.copy(self.image)
+        self.working_mask = np.copy(self.mask)
+        self.front = np.zeros([self.iheight, self.iwidth])
+        self.confidence = (1 - self.mask).astype(float)
+        self.data = np.zeros([self.iheight, self.iwidth])
+        self.priority = np.zeros([self.iheight, self.iwidth])
+
+    def inpaint(self):
+        '''
+        Compute the new image and return it.
+        '''
+        self._validate_inputs()
+        self._initialize_attributes()
+
+        start_time = time.time()
+        keep_going = True
+        c = 0
+        while keep_going:
+            self._find_front()
+
+            if self.show_progress:
+                name = 'Results/working_image_' + str(c) + '.png'
+                cv2.imwrite(name, self.working_image)
+
+            self._update_priority()
+
+            target_pixel = self._find_highest_priority_pixel()
+            find_start_time = time.time()
+            source_patch = self._find_source_patch(target_pixel)
+            if self.verbose:
+                print('Time to find best: %f seconds' % (time.time()-find_start_time))
+
+            self._update_image(target_pixel, source_patch)
+
+            keep_going = not self._finished()
+            c += 1
+
+        if self.verbose:
+            print('Inpainting took %f seconds to complete' % (time.time() - start_time))
+        return self.working_image
+
+    def _validate_inputs(self):
+        if self.image.shape[:2] != self.mask.shape:
+            raise AttributeError('mask and image must be of the same size')
+
+    def _initialize_attributes(self):
+        """ Initialize the non initialized attributes
+
+        The confidence is initially the inverse of the mask, that is, the
+        target region is 0 and source region is 1.
+
+        The data starts with zero for all pixels.
+
+        The working image and working mask start as copies of the original
+        image and mask.
+        """
+        self.confidence = (1 - self.mask).astype(float)
+        self.data = np.zeros([self.iheight, self.iwidth])
+
+        self.working_image = np.copy(self.image)
+        self.working_mask = np.copy(self.mask)
+
+    def _find_front(self):
+        """ Find the front using laplacian on the mask
+
+        The laplacian will give us the edges of the mask, it will be positive
+        at the higher region (white) and negative at the lower region (black).
+        We only want the the white region, which is inside the mask, so we
+        filter the negative values.
+        """
+        self.front = cv2.Laplacian(self.working_mask, cv2.CV_8U, ksize=3)
+        self.front[self.front < 0] = 0
+
+    def _update_priority(self):
+        self._update_confidence()
+        self._update_data()
+        self.priority = self.confidence * self.data * self.front
+
+    def _update_confidence(self):
+        new_confidence = np.copy(self.confidence)
+        front_positions = np.argwhere(self.front > 0)
+        for point in front_positions:
+            patch = self._get_patch(point)
+            new_confidence[point[0], point[1]] = np.sum(np.sum(
+                self._patch_data(self.confidence, patch))) / self.patch_size**2
+
+        self.confidence = new_confidence
+
+    def _update_data(self):
+        normal = self._calc_normal_matrix()
+        gradient = self._calc_gradient_matrix()
+
+        normal_gradient = normal * gradient
+        self.data = np.sqrt(
+            normal_gradient[:, :, 0]**2 + normal_gradient[:, :, 1]**2
+        ) + 0.001  # To be sure to have a greater than 0 data
+
+    def _calc_normal_matrix(self):
+        x_kernel = np.array([[.25, 0, -.25], [.5, 0, -.5], [.25, 0, -.25]])
+        y_kernel = np.array([[-.25, -.5, -.25], [0, 0, 0], [.25, .5, .25]])
+
+        x_normal = cv2.filter2D(self.working_mask.astype(float), -1, x_kernel)
+        y_normal = cv2.filter2D(self.working_mask.astype(float), -1, y_kernel)
+        normal = np.dstack((x_normal, y_normal))
+
+        height, width = normal.shape[:2]
+        norm = np.sqrt(y_normal**2 + x_normal**2)
+        norm = norm.reshape(height, width, 1) \
+                 .repeat(2, axis=2)
+        norm[norm == 0] = 1
+
+        unit_normal = normal/norm
+        return unit_normal
+
+    def _calc_gradient_matrix(self):
+        height, width = self.working_image.shape[:2]
+
+        grey_image = cv2.cvtColor(self.working_image, cv2.COLOR_BGR2GRAY)
+        grey_image[self.working_mask > 0] = 0
+
+        gradient = np.nan_to_num(np.array(np.gradient(grey_image)))
+        gradient_val = np.sqrt(gradient[0]**2 + gradient[1]**2)
+        max_gradient = np.zeros([height, width, 2])
+
+        front_positions = np.argwhere(self.front > 0)
+        for p in front_positions:
+            patch = self._get_patch(p)
+            patch_y_gradient = self._patch_data(gradient[0], patch)
+            patch_x_gradient = self._patch_data(gradient[1], patch)
+            patch_gradient_val = self._patch_data(gradient_val, patch)
+
+            patch_max_pos = np.unravel_index(
+                patch_gradient_val.argmax(),
+                patch_gradient_val.shape
+            )
+
+            max_gradient[p[0], p[1], 0] = patch_y_gradient[patch_max_pos]
+            max_gradient[p[0], p[1], 1] = patch_x_gradient[patch_max_pos]
+
+        return max_gradient
+
+    def _find_highest_priority_pixel(self):
+        point = np.unravel_index(self.priority.argmax(), self.priority.shape)
+        return point
+
+    def _find_source_patch(self, target_pixel):
+        target_patch = self._get_patch(target_pixel)
+        height, width = self.working_image.shape[:2]
+        patch_height, patch_width = self._patch_shape(target_patch)
+
+        best_match = None
+        best_match_difference = 0
+
+        lab_image = cv2.cvtColor(self.working_image, cv2.COLOR_BGR2LAB)
+
+        for y in range(height - patch_height + 1):
+            for x in range(width - patch_width + 1):
+                source_patch = [
+                    [y, y + patch_height-1],
+                    [x, x + patch_width-1]
+                ]
+                if self._patch_data(self.working_mask, source_patch).sum() != 0:
+                    continue
+
+                difference = self._calc_patch_difference(
+                    lab_image,
+                    target_patch,
+                    source_patch
+                )
+
+                if best_match is None or difference < best_match_difference:
+                    best_match = source_patch
+                    best_match_difference = difference
+        return best_match
+
+    def _update_image(self, target_pixel, source_patch):
+        target_patch = self._get_patch(target_pixel)
+        pixels_positions = np.argwhere(
+            self._patch_data(
+                self.working_mask,
+                target_patch
+            ) > 0
+        ) + [target_patch[0][0], target_patch[1][0]]
+        patch_confidence = self.confidence[target_pixel[0], target_pixel[1]]
+        for point in pixels_positions:
+            self.confidence[point[0], point[1]] = patch_confidence
+
+        mask = self._patch_data(self.working_mask, target_patch)
+        rgb_mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        source_data = self._patch_data(self.working_image, source_patch)
+        target_data = self._patch_data(self.working_image, target_patch)
+
+        new_data = source_data*rgb_mask + target_data*(1-rgb_mask)
+
+        self._copy_to_patch(
+            self.working_image,
+            target_patch,
+            new_data
+        )
+        self._copy_to_patch(
+            self.working_mask,
+            target_patch,
+            0
+        )
+
+    def _get_patch(self, point):
+        half_patch_size = (self.patch_size-1)//2
+        height, width = self.working_image.shape[:2]
+        patch = [
+            [
+                max(0, point[0] - half_patch_size),
+                min(point[0] + half_patch_size, height-1)
+            ],
+            [
+                max(0, point[1] - half_patch_size),
+                min(point[1] + half_patch_size, width-1)
+            ]
+        ]
+        return patch
+
+    def _calc_patch_difference(self, image, target_patch, source_patch):
+        mask = 1 - self._patch_data(self.working_mask, target_patch)
+        rgb_mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        target_data = self._patch_data(
+            image,
+            target_patch
+        ) * rgb_mask
+        source_data = self._patch_data(
+            image,
+            source_patch
+        ) * rgb_mask
+        squared_distance = np.sum(((target_data - source_data)**2))
+        euclidean_distance = np.sqrt(
+            (target_patch[0][0] - source_patch[0][0])**2 +
+            (target_patch[1][0] - source_patch[1][0])**2
+        )  # tie-breaker factor
+        return squared_distance + euclidean_distance
+
+    def _finished(self):
+        remaining = np.sum(self.working_mask)
+        total = np.sum(self.mask)
+        if self.verbose:
+            print('%d of %d completed' % (total-remaining, total))
+        return remaining == 0
+
+    @staticmethod
+    def _patch_shape(patch):
+        return (1+patch[0][1]-patch[0][0]), (1+patch[1][1]-patch[1][0])
+
+    @staticmethod
+    def _patch_data(source, patch):
+        return source[
+            patch[0][0]:patch[0][1]+1,
+            patch[1][0]:patch[1][1]+1
+        ]
+
+    @staticmethod
+    def _copy_to_patch(dest, dest_patch, data):
+        dest[
+            dest_patch[0][0]:dest_patch[0][1]+1,
+            dest_patch[1][0]:dest_patch[1][1]+1
+        ] = data
 
 def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 1000):
     height, width = src.shape[:2]
     mask = target.copy()
+    grey_img = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
 
     # confidence values for each pixel
     # initialised at 1 for missing region, 0 for known region
     # i.e. 1 - binary target mask
-    C = (1-target).astype(np.float32)
+    C = (1.0 - target).astype(np.float32)
     # data values for each pixel
     D = np.zeros((height, width), np.uint8)
     # priority values for each pixel
@@ -205,20 +460,54 @@ def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 
         # identify fill front and filter out negative values
         # fill_front = cv2.Canny(target, 100, 200)
         fill_front = cv2.Laplacian(mask, cv2.CV_8U, ksize=3)
-        # fill_front = np.clip(fill_front, 0, 1)
 
         # if fill front empty, break
         if np.sum(fill_front) == 0:
             break
 
-        # update priorities for pixels in fill front
-        for i in range(height):
-            for j in range(width):
-                # if pixel in fill front
-                if fill_front[i, j] != 0:
-                    # compute priority
-                    P[i, j] = C[i, j] * D[i, j]
+        # update priorities of patches centred on fill front
+        front_positions = np.argwhere(fill_front > 0)
+        for i in range(len(front_positions)):
+            p = front_positions[i]
+            # get patch centred at p
+            # NOTE watchout for boundary patches?
+            patch = [[p[0]-patch_size//2, p[1]-patch_size//2],
+                        [p[0]+patch_size//2, p[1]+patch_size//2]]
+            
+            # update confidence values
+            # C(p) = sum(confidence of pixels in patch) / patch area
+            C[p[0], p[1]] = np.sum(C[p[0]-patch_size//2 : p[0]+patch_size//2+1,
+                                     p[1]-patch_size//2 : p[1]+patch_size//2+1]) / patch_size**2
+            
+            # update data values
+            # D(p) = magnitude(isophote at p * normal to ff at p) / alpha
+            # NOTE use matrix mult to speed up?
+            alpha = 255
 
+            ## normal to fill front at p
+            # imagine tangent line between two points either side of p on fill front
+            if i == 0:
+                preceding = front_positions[-1]
+                successive = front_positions[i+1]
+            elif i == len(front_positions) - 1:
+                preceding = front_positions[i-1]
+                successive = front_positions[0]
+            else:
+                preceding = front_positions[i-1]
+                successive = front_positions[i+1]
+            # gradient of normal = -1 / gradient of tangent
+            normal_grad =  -(successive[1] - preceding[1]) / (successive[0] - preceding[0])
+            # get unit vector normal through p
+            normal = np.array([1, normal_grad])
+            print(normal)
+            exit()
+            normal = normal / np.linalg.norm(normal)
+
+            ## isophote at p = max image gradient in patch
+            # get image gradient in patch
+            
+
+        break
 
     return src
 
@@ -320,6 +609,7 @@ def band_pass(grey_img, radius_small, radius_big):
 
     return filtered_img_normalised, magnitude_spectrum_normalised
 
+
 # Main function
 def process_image(image):
     '''
@@ -328,33 +618,56 @@ def process_image(image):
     # fix warped perspective
     image = fix_perspective(image)
 
+    # greyscale
+    grey_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # show histogram of bgr channels
+    import matplotlib.pyplot as plt
+    colours = ['b', 'g', 'r']
+    for i in range(3):
+        hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+        plt.plot(hist, color=colours[i])
+        plt.xlim([0, 256])
+    plt.savefig('Results/histogram_1.png')
+
     # histogram equalisation in l*a*b* colour space
     image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(image)
 
     clahe = cv2.createCLAHE(clipLimit=2, tileGridSize=(8, 8))
-    # l = clahe.apply(l)
+    l = clahe.apply(l)
 
     image = cv2.merge([l, a, b])
     image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
 
-    # greyscale
-    grey_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # remove s&p
+    image = cv2.medianBlur(image, 3)
+
+    # remove gaussian noise
+    image = cv2.bilateralFilter(image, d=9, sigmaColor=70, sigmaSpace=150)
+    # image = cv2.fastNlMeansDenoisingColored(image, None, h=10, hColor=10, templateWindowSize=11, searchWindowSize=21)
+
+    # sharpen edges
+    # image = cv2.GaussianBlur(image, (3, 3), 0)
+    laplacian = cv2.Laplacian(image, cv2.CV_8U)
+    # image = cv2.subtract(image, laplacian)
 
     # create mask using thresholding for missing circle region
     # mask = cv2.inRange(image, 30, 230)
     # mask = cv2.bitwise_not(mask)
-    # grey_mask = cv2.inRange(grey_img, 0, 10)
+    grey_mask = cv2.inRange(grey_img, 0, 10)
     colour_mask = cv2.inRange(image, (0, 0, 0), (10, 10, 10))
 
     # inpaint using circle mask
     # grey_img = cv2.inpaint(grey_img, grey_mask, 9, cv2.INPAINT_NS)
     # image = cv2.inpaint(image, colour_mask, 9, cv2.INPAINT_NS)
-    image = criminisi_inpaint(image, colour_mask)
+    # image = criminisi_inpaint(image, colour_mask)
 
-    # remove s&p noise
-    # grey_img = conservative_smoothing(grey_img, 5)
-    # grey_img = cv2.medianBlur(grey_img, 3)
+    binary_mask = np.zeros(grey_img.shape, np.uint8)
+    binary_mask[grey_mask > 0] = 1
+
+    inpainter = Criminisi_Inpainter(image, binary_mask, patch_size=15, verbose=True, show_progress=False)
+    # image = inpainter.inpaint()
 
     # band pass filter
     # image, magnitude_spectrum = band_pass(grey_img, 1, 20)
@@ -368,7 +681,7 @@ def process_image(image):
     # use greyscale nlm on different colour channels w different h values
 
     # add false colour
-    # colour_mapped = cv2.applyColorMap(grey_img, cv2.COLORMAP_JET)
+    colour_mapped = cv2.applyColorMap(grey_img, cv2.COLORMAP_TURBO) # turbo or jet?
     # image = colour_transfer(image, colour_mapped)
     # image = grey_img
 
@@ -378,9 +691,12 @@ def process_image(image):
 isTesting = True
 
 healthy = 'im001-healthy.jpg'
+healthy_4 = 'im004-healthy.jpg'
+healthy_12 = 'im012-healthy.jpg'
 pneumonia = 'im053-pneumonia.jpg'
+pneumonia_100 = 'im100-pneumonia.jpg'
 
-img_name = 'im100-pneumonia.jpg'
+img_name = healthy_4
 # TESTING ======================================================================
 
 # load images & process
