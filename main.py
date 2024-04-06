@@ -16,7 +16,7 @@ except:
 if not os.path.isdir('Results'):
     os.mkdir('Results')
 
-refreshResults = False
+refreshResults = True
 
 # delete contents of results directory if wanted
 if refreshResults:
@@ -48,10 +48,11 @@ def fix_perspective(image):
     corners = cv2.goodFeaturesToTrack(square_mask, 4, 0.01, 10)
     corners = corners.reshape(4, 2)
 
-    map_to = [[0, 0], [width, 0], [0, height], [width, height]]  # 4 corners of new image
+    map_to = [[0, 0], [width, 0], [0, height], [width, height]]  # desired 4 corners after warp
     map_from = [[0., 0.]] * 4  # to store 4 corners of ROI
 
     # sort corners of ROI to align with corners of frame
+    # such that map_from[i] is closest corner to map_to[i]
     for i in range(len(map_to)):
         min_dist = 1000000
         for c in corners:
@@ -68,6 +69,9 @@ def fix_perspective(image):
 
 def remove_R(image):
     height, width = image.shape[:2]
+
+    # isolate red channel
+    r = image[:, :, 2]
 
     # create template containing red 'R'
     template_size = 50
@@ -173,15 +177,21 @@ class Criminisi_Inpainter():
         self.image = image.astype('uint8')
         self.mask = mask.round().astype('uint8')
         self.patch_size = patch_size
-        self.iheight, self.iwidth = self.image.shape[:2]
         self.verbose = verbose
         self.show_progress = show_progress
 
-        # Non-initialized attributes
+        ## non-argument attributes
+        self.iheight, self.iwidth = self.image.shape[:2]
+        # The working image and working mask start as copies of the original
+        # image and mask.
         self.working_image = np.copy(self.image)
         self.working_mask = np.copy(self.mask)
         self.front = np.zeros([self.iheight, self.iwidth])
+        
+        # The confidence is initially the inverse of the mask, that is, the
+        # target region is 0 and source region is 1.
         self.confidence = (1 - self.mask).astype(float)
+        # The data and priority matrices start with zero for all pixels.
         self.data = np.zeros([self.iheight, self.iwidth])
         self.priority = np.zeros([self.iheight, self.iwidth])
 
@@ -190,7 +200,6 @@ class Criminisi_Inpainter():
         Compute the new image and return it.
         '''
         self._validate_inputs()
-        self._initialize_attributes()
 
         start_time = time.time()
         keep_going = True
@@ -222,23 +231,6 @@ class Criminisi_Inpainter():
     def _validate_inputs(self):
         if self.image.shape[:2] != self.mask.shape:
             raise AttributeError('mask and image must be of the same size')
-
-    def _initialize_attributes(self):
-        """ Initialize the non initialized attributes
-
-        The confidence is initially the inverse of the mask, that is, the
-        target region is 0 and source region is 1.
-
-        The data starts with zero for all pixels.
-
-        The working image and working mask start as copies of the original
-        image and mask.
-        """
-        self.confidence = (1 - self.mask).astype(float)
-        self.data = np.zeros([self.iheight, self.iwidth])
-
-        self.working_image = np.copy(self.image)
-        self.working_mask = np.copy(self.mask)
 
     def _find_front(self):
         """ Find the front using laplacian on the mask
@@ -618,17 +610,46 @@ def process_image(image):
     # fix warped perspective
     image = fix_perspective(image)
 
+    # set entire red channel = 0
+    image[:, :, 2] = 0
+
+    return image
+
+    # show histogram of bgr channels
+    # import matplotlib.pyplot as plt
+    # colours = ['b', 'g', 'r']
+    # for i in range(3):
+    #     hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+    #     plt.plot(hist, color=colours[i])
+    #     plt.xlim([0, 256])
+    # plt.savefig('Results/histogram_1.png')
+
     # greyscale
     grey_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # show histogram of bgr channels
-    import matplotlib.pyplot as plt
-    colours = ['b', 'g', 'r']
-    for i in range(3):
-        hist = cv2.calcHist([image], [i], None, [256], [0, 256])
-        plt.plot(hist, color=colours[i])
-        plt.xlim([0, 256])
-    plt.savefig('Results/histogram_1.png')
+    # create binary mask of missing region for inpainting
+    inpainting_mask = cv2.inRange(grey_img, 0, 10)
+    inpainting_mask[inpainting_mask > 0] = 1
+
+    # inpaint using circle mask
+    # grey_img = cv2.inpaint(grey_img, grey_mask, 9, cv2.INPAINT_NS)
+    # image = cv2.inpaint(image, colour_mask, 9, cv2.INPAINT_NS)
+    # image = criminisi_inpaint(image, colour_mask)
+
+    inpainter = Criminisi_Inpainter(image, inpainting_mask, patch_size=15, verbose=False, show_progress=False)
+    image = inpainter.inpaint()
+    
+    # remove s&p
+    image = cv2.medianBlur(image, 3)
+
+    # remove gaussian noise
+    # image = cv2.bilateralFilter(image, d=9, sigmaColor=70, sigmaSpace=150)
+    image = cv2.fastNlMeansDenoisingColored(image, None, h=10, hColor=10, templateWindowSize=11, searchWindowSize=21)
+
+    # sharpen edges
+    # image = cv2.GaussianBlur(image, (3, 3), 0)
+    laplacian = cv2.Laplacian(image, cv2.CV_8U)
+    image = cv2.subtract(image, laplacian)
 
     # histogram equalisation in l*a*b* colour space
     image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
@@ -639,35 +660,6 @@ def process_image(image):
 
     image = cv2.merge([l, a, b])
     image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
-
-    # remove s&p
-    image = cv2.medianBlur(image, 3)
-
-    # remove gaussian noise
-    image = cv2.bilateralFilter(image, d=9, sigmaColor=70, sigmaSpace=150)
-    # image = cv2.fastNlMeansDenoisingColored(image, None, h=10, hColor=10, templateWindowSize=11, searchWindowSize=21)
-
-    # sharpen edges
-    # image = cv2.GaussianBlur(image, (3, 3), 0)
-    laplacian = cv2.Laplacian(image, cv2.CV_8U)
-    # image = cv2.subtract(image, laplacian)
-
-    # create mask using thresholding for missing circle region
-    # mask = cv2.inRange(image, 30, 230)
-    # mask = cv2.bitwise_not(mask)
-    grey_mask = cv2.inRange(grey_img, 0, 10)
-    colour_mask = cv2.inRange(image, (0, 0, 0), (10, 10, 10))
-
-    # inpaint using circle mask
-    # grey_img = cv2.inpaint(grey_img, grey_mask, 9, cv2.INPAINT_NS)
-    # image = cv2.inpaint(image, colour_mask, 9, cv2.INPAINT_NS)
-    # image = criminisi_inpaint(image, colour_mask)
-
-    binary_mask = np.zeros(grey_img.shape, np.uint8)
-    binary_mask[grey_mask > 0] = 1
-
-    inpainter = Criminisi_Inpainter(image, binary_mask, patch_size=15, verbose=True, show_progress=False)
-    # image = inpainter.inpaint()
 
     # band pass filter
     # image, magnitude_spectrum = band_pass(grey_img, 1, 20)
@@ -681,7 +673,7 @@ def process_image(image):
     # use greyscale nlm on different colour channels w different h values
 
     # add false colour
-    colour_mapped = cv2.applyColorMap(grey_img, cv2.COLORMAP_TURBO) # turbo or jet?
+    # colour_mapped = cv2.applyColorMap(grey_img, cv2.COLORMAP_TURBO) # turbo or jet?
     # image = colour_transfer(image, colour_mapped)
     # image = grey_img
 
@@ -690,10 +682,13 @@ def process_image(image):
 # TESTING ======================================================================
 isTesting = True
 
-healthy = 'im001-healthy.jpg'
-healthy_4 = 'im004-healthy.jpg'
+healthy_1 = 'im001-healthy.jpg'
+healthy_4 = 'im004-healthy.jpg' # example on gc
 healthy_12 = 'im012-healthy.jpg'
-pneumonia = 'im053-pneumonia.jpg'
+healthy_42 = 'im042-healthy.jpg' # bad criminisi
+pneumonia_53 = 'im053-pneumonia.jpg'
+pneumonia_56 = 'im056-pneumonia.jpg' # bad contrast
+pneumonia_74 = 'im074-pneumonia.jpg' # hard to see red R
 pneumonia_100 = 'im100-pneumonia.jpg'
 
 img_name = healthy_4
