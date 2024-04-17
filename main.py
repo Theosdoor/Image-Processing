@@ -174,14 +174,14 @@ class Criminisi_Inpainter():
         Pixels values: 1 for missing, 0 for known region.
     '''
     def __init__(self, image, mask, patch_size=9, verbose=False, show_progress=False):
-        self.image = image.astype('uint8')
+        self.image = image.astype('uint8') # TODO need to change to uint8? i think they are already that and need to keep same
         self.mask = mask.round().astype('uint8')
         self.patch_size = patch_size
         self.verbose = verbose
         self.show_progress = show_progress
 
         ## non-argument attributes
-        self.iheight, self.iwidth = self.image.shape[:2]
+        self.iheight, self.iwidth = self.image.shape[:2] # TODO change var names to fit criminisi paper
         # The working image and working mask start as copies of the original
         # image and mask.
         self.working_image = np.copy(self.image)
@@ -190,7 +190,7 @@ class Criminisi_Inpainter():
 
         # The confidence is initially the inverse of the mask, that is, the
         # target region is 0 and source region is 1.
-        self.confidence = (1 - self.mask).astype(float)
+        self.confidence = (1 - self.mask).astype(float) # TODO check how astype(float) affects it
         # The data and priority matrices start with zero for all pixels.
         self.data = np.zeros([self.iheight, self.iwidth])
         self.priority = np.zeros([self.iheight, self.iwidth])
@@ -204,7 +204,7 @@ class Criminisi_Inpainter():
         start_time = time.time()
         keep_going = True
         c = 0
-        while keep_going:
+        while keep_going: # TODO use while true loop instead?
             self._find_front()
 
             if self.show_progress:
@@ -221,7 +221,7 @@ class Criminisi_Inpainter():
 
             self._update_image(target_pixel, source_patch)
 
-            keep_going = not self._finished()
+            keep_going = not self._finished() # if self.finished
             c += 1
 
         if self.verbose:
@@ -233,10 +233,11 @@ class Criminisi_Inpainter():
             raise AttributeError('mask and image must be of the same size')
 
     def _find_front(self):
-        """ Find the front using laplacian on the mask
-
-        The laplacian will give us the edges of the mask, it will be positive
-        at the higher region (white) and negative at the lower region (black).
+        """ 
+        Find the fill front using laplacian on the mask.
+        
+        The laplacian gives mask edges - positive at the higher region (white)
+        and negative at the lower region (black).
         We only want the the white region, which is inside the mask, so we
         filter the negative values.
         """
@@ -246,15 +247,18 @@ class Criminisi_Inpainter():
     def _update_priority(self):
         self._update_confidence()
         self._update_data()
+        # update priority for every pixel, P = C * D.
+        # (multiply confidence and data matrix by fill front to apply to all
+        #     pixels at once --> much more efficient than for loop!)
         self.priority = self.confidence * self.data * self.front
 
     def _update_confidence(self):
         new_confidence = np.copy(self.confidence)
-        front_positions = np.argwhere(self.front > 0)
+        front_positions = np.argwhere(self.front > 0) # get list of pixels on fill front
         for point in front_positions:
             patch = self._get_patch(point)
-            new_confidence[point[0], point[1]] = np.sum(np.sum(
-                self._patch_data(self.confidence, patch))) / self.patch_size**2
+            new_confidence[point[0], point[1]] =
+                np.sum(np.sum(self._patch_data(self.confidence, patch))) / self.patch_size**2
 
         self.confidence = new_confidence
 
