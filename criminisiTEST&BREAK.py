@@ -434,10 +434,12 @@ def process_image(image):
     image = fix_perspective(image)
 
     # create binary mask of missing region for inpainting
+    grey_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     inpainting_mask = cv2.inRange(grey_img, 0, 10)
     inpainting_mask[inpainting_mask > 0] = 1
 
     inpainter = Criminisi_Inpainter(image, inpainting_mask, patch_size=15, verbose=False, show_progress=False)
+    image = inpainter.inpaint()
    
     return image
 

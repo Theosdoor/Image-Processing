@@ -48,7 +48,11 @@ def fix_perspective(image):
     corners = cv2.goodFeaturesToTrack(square_mask, 4, 0.01, 10)
     corners = corners.reshape(4, 2)
 
-    map_to = [[0, 0], [width, 0], [0, height], [width, height]]  # desired 4 corners after warp
+    border_width = 4 # border around image (set = 0 for no border)
+    map_to = [[border_width, border_width],
+              [width-border_width, border_width],
+              [border_width, height-border_width],
+              [width-border_width, height-border_width]]  # desired 4 corners after warp
     map_from = [[0., 0.]] * 4  # to store 4 corners of ROI
 
     # sort corners of ROI to align with corners of frame
@@ -619,21 +623,42 @@ def process_image(image):
     # convert to hsv space
     image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
+    h, s, v = cv2.split(image)
+
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    # h = clahe.apply(h)
+
+    image = cv2.merge([h, s, v])
+
+    # create histogram of hsv space
+    import matplotlib.pyplot as plt
+    plt.figure()
+    for i in range(3):
+        hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+        plt.plot(hist)
+        plt.xlim([0, 256])
+    plt.legend(['h', 's', 'v'])
+    plt.savefig('Results/histogram_hsv.png')
+
+    # return image
+
+
     # gamma correction on v channel
     gamma = 2
-    image[:, :, 2] = np.power(image[:, :, 2] / 255.0, gamma) * 255.0
+    # image[:, :, 2] = np.power(image[:, :, 2] / 255.0, gamma) * 255.0
 
     # apply median blur to v channel
     # image[:, :, 2] = cv2.medianBlur(image[:, :, 2], 3)
 
     # sharpen edges
-    laplacian = cv2.Laplacian(image[:, :, 2], cv2.CV_8U)
+    # laplacian = cv2.Laplacian(image[:, :, 2], cv2.CV_8U)
     # image[:, :, 2] = cv2.subtract(image[:, :, 2], laplacian)
 
     # band pass filter on v channel
     # image[:, :, 1], _ = band_pass(image[:, :, 1], 150, 250)
 
     # convert back to bgr
+    image = cv2.merge([h, s, v])
     image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
 
     # greyscale
@@ -641,6 +666,7 @@ def process_image(image):
 
     # create binary mask of missing region for inpainting
     inpainting_mask = cv2.inRange(grey_img, 0, 10)
+    # return inpainting_mask
     inpainting_mask[inpainting_mask > 0] = 1
 
     # inpaint using circle mask
@@ -648,7 +674,7 @@ def process_image(image):
     # image = cv2.inpaint(image, colour_mask, 9, cv2.INPAINT_NS)
     # image = criminisi_inpaint(image, colour_mask)
 
-    inpainter = Criminisi_Inpainter(image, inpainting_mask, patch_size=15, verbose=False, show_progress=False)
+    # inpainter = Criminisi_Inpainter(image, inpainting_mask, patch_size=11, verbose=True, show_progress=False)
     # image = inpainter.inpaint()
     
     # remove s&p
@@ -658,26 +684,49 @@ def process_image(image):
     # image = cv2.bilateralFilter(image, d=9, sigmaColor=70, sigmaSpace=150)
     # image = cv2.fastNlMeansDenoisingColored(image, None, h=10, hColor=10, templateWindowSize=11, searchWindowSize=21)
 
+    # sharpen edges
+    # laplacian = cv2.Laplacian(image[:, :, 2], cv2.CV_8U)
+    # image[:, :, 2] = cv2.subtract(image[:, :, 2], laplacian)
+
     # convert to l*a*b* colour space
     image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(image)
 
-    # apply CLAHE to l channel
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    # # apply CLAHE to l channel
+    # clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     # l = clahe.apply(l)
 
-    # convert back to BGR
     image = cv2.merge([l, a, b])
+
+    # plot lab channels
+    plt.figure()
+    for i in range(3):
+        hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+        plt.plot(hist)
+        plt.xlim([0, 256])
+    plt.legend(['l', 'a', 'b'])
+    plt.savefig('Results/histogram_lab.png')
+
+    # # convert back to BGR
     image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
 
-    # # show histogram of bgr channels
-    # import matplotlib.pyplot as plt
-    # colours = ['b', 'g', 'r']
-    # for i in range(3):
-    #     hist = cv2.calcHist([image], [i], None, [256], [0, 256])
-    #     plt.plot(hist, color=colours[i])
-    #     plt.xlim([0, 256])
-    # plt.savefig('Results/histogram_2.png')
+    # get blue channel
+    b, g, r = cv2.split(image)
+
+    clahe = cv2.createCLAHE(clipLimit=1.0, tileGridSize=(8, 8))
+    # b = clahe.apply(b)
+
+    image = cv2.merge([b, g, r])
+
+    # show histogram of bgr channels
+    plt.figure()
+    colours = ['b', 'g', 'r']
+    for i in range(3):
+        hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+        plt.plot(hist, color=colours[i])
+        plt.xlim([0, 256])
+    plt.legend(['b', 'g', 'r'])
+    plt.savefig('Results/histogram_rgb.png')
 
     # band pass filter
     # image, magnitude_spectrum = band_pass(grey_img, 1, 20)
