@@ -411,8 +411,7 @@ def band_pass(grey_img, radius_small, radius_big):
 
     # normalized the filtered image into 0 -> 255 (8-bit grayscale) so we
     # can see the output
-    min_val, max_val, min_loc, max_loc = \
-        cv2.minMaxLoc(filtered_img[:, :, 0])
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(filtered_img[:, :, 0])
     filtered_img_normalised = filtered_img[:, :, 0] * (
         1.0 / (max_val - min_val)) + ((-min_val) / (max_val - min_val))
     filtered_img_normalised = np.uint8(filtered_img_normalised * 255)
@@ -444,11 +443,84 @@ def process_image(image):
     '''
     # fix warped perspective
     image = fix_perspective(image)
+    # image = cv2.imread('sample-xray98.png', cv2.IMREAD_COLOR)
+        
+    # fix colour channel imbalance (green sections are white)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(image)
 
-    ref = cv2.imread('sample-xray.png', cv2.IMREAD_COLOR)
+    # v, mag_spec = band_pass(v, 10, 50)
+
+    # # plot hue
+    # if isTesting:
+    #     plt.figure()
+    #     plt.grid()
+    #     hist = cv2.calcHist([h], [0], None, [200], [0, 200])
+    #     plt.plot(hist)
+    #     plt.xlim([0, 180])
+    #     plt.ylim([0, 7000])
+    #     plt.xticks(np.arange(0, 180, 20), rotation=45)
+    #     plt.savefig('histogram_hue.png')
+
+    # # isolate green hue range
+    # # hue_range = cv2.inRange(h, 43, 80)
+
+
+    # # morph_close to join up green regions
+    # # kernel = np.ones((5, 5), np.uint8)
+    # # hue_range = cv2.morphologyEx(hue_range, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    # # clip so all still green
+    # # hue_range.clip(43, 80)
+
+    # # v[hue_range == 0] = 0 # to see green elements only
+    # # h[hue_range > 0] = 1
+
+    # gamma = 0.9
+    # lookUpTable = np.empty((1,256), np.uint8)
+    # for i in range(256):
+    #     lookUpTable[0,i] = np.clip(pow(i / 255.0, gamma) * 255.0, 0, 255)
+    
+    # # s[hue_range > 0] += 2 # so that it is not 0 or 1
+    # # s = cv2.LUT(s, lookUpTable)
+
+    image = cv2.merge((h, s, v))
+    image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
+
+
 
     # greyscale
     grey_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # bleached = cv2.inRange(grey_img, 215,225)
+
+    # image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    # h, s, v = cv2.split(image_hsv)
+
+    # white_pix = np.argwhere(bleached > 0)
+
+    # # get normal distribution between 40 and 80
+    # mean = 60
+    # std = 10
+    # h[bleached > 0] = np.random.normal(mean, std, len(white_pix))
+
+    # image = cv2.merge((h, s, v))
+    # image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
+
+    # # plot hue
+    # if isTesting:
+    #     plt.figure()
+    #     plt.grid()
+    #     hist = cv2.calcHist([h], [0], None, [200], [0, 200])
+    #     plt.plot(hist)
+    #     plt.xlim([0, 180])
+    #     plt.ylim([0, 7000])
+    #     plt.xticks(np.arange(0, 180, 20), rotation=45)
+    #     plt.savefig('hist_hue.png')
+
+    # # return image
+
+    # ===========================
 
     # create mask of missing region for inpainting
     inpainting_mask = cv2.inRange(grey_img, 0, 10)
@@ -476,41 +548,46 @@ def process_image(image):
         verbose = False
 
     inpainter = Criminisi_Inpainter(image, inpainting_mask, patch_size=9, verbose=verbose, show_progress=False)
-    image = inpainter.inpaint()
+    # image = inpainter.inpaint()
+    image = cv2.inpaint(image, inpainting_mask, 3, cv2.INPAINT_TELEA)
 
-    # remove s&p
+    ## remove s&p
     image = cv2.medianBlur(image, 3)
 
-    # remove gaussian noise
+    ## remove gaussian noise
 
     # nl means
     image = cv2.fastNlMeansDenoisingColored(
-        image, None, h=10, hColor=1,
+        image, None, h=7, hColor=1,
         templateWindowSize=9, searchWindowSize=31)
+
+    # sharpen edges
+    laplacian = cv2.Laplacian(image, cv2.CV_8U, ksize=1)
+    image = cv2.subtract(image, laplacian)
 
     # bilateral filter
     # image = cv2.bilateralFilter(
     #     image, d=9, sigmaColor=75, sigmaSpace=75,
     #     borderType=cv2.BORDER_DEFAULT)
 
-    # sharpen edges
-    laplacian = cv2.Laplacian(image, cv2.CV_8U, ksize=1)
-    image = cv2.subtract(image, laplacian)
+    return image
+
+    # ===========================
 
     # convert to l*a*b* colour space
     image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(image)
 
-    gamma = 1.5
+    gamma = 1.2
     lookUpTable = np.empty((1,256), np.uint8)
     for i in range(256):
         lookUpTable[0,i] = np.clip(pow(i / 255.0, gamma) * 255.0, 0, 255)
     
-    l = cv2.LUT(l, lookUpTable)
+    # l = cv2.LUT(l, lookUpTable)
 
     # hist eq on l channel
     tile_size = 4
-    clahe = cv2.createCLAHE(clipLimit=2.0, 
+    clahe = cv2.createCLAHE(clipLimit=2.6, # b/t 2.3-3.2
                             tileGridSize=(tile_size, tile_size))
     # l = clahe.apply(l)
 
@@ -531,8 +608,10 @@ def process_image(image):
 
     b, g, r = cv2.split(image)
 
+    tile_size = 4
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(tile_size, tile_size))
-    b = clahe.apply(b)
+    # b = clahe.apply(b)
+    # r = clahe.apply(r)
 
     image = cv2.merge((b, g, r))
 
@@ -545,11 +624,6 @@ def process_image(image):
     #     plt.xlim([1, 256])
     # plt.legend(['b', 'g', 'r'])
     # plt.savefig('histogram_rgb.png')
-
-    # add false colour
-    # colour_mapped = cv2.applyColorMap(grey_img, cv2.COLORMAP_TURBO) # turbo or jet?
-    # image = colour_transfer(image, colour_mapped)
-    # image = grey_img
 
     return image
 
@@ -567,7 +641,7 @@ pneumonia_74 = 'im074-pneumonia.jpg' # hard to see red R
 pneumonia_98 = 'im098-pneumonia.jpg' # sample image
 pneumonia_100 = 'im100-pneumonia.jpg'
 
-img_name = healthy_31
+img_name = pneumonia_98
 # TESTING ======================================================================
 start_time = time.time()
 
@@ -586,7 +660,6 @@ for tag in os.listdir(path_to_images):
 
     # check it has loaded
     if not img_loaded is None:
-        # print(tag + " processing...")
         process_start_time = time.time()
         processed = process_image(img_loaded)
         cv2.imwrite(os.path.join('Results', tag), processed)
