@@ -3,7 +3,9 @@
     "files.watcherExclude": {
         "**/image_processing_files/**": true,
         // exclude image_processing_files
-        "**/image_processing_files": true
+        "**/image_processing_files": true,
+        // exclude results directory
+        "**/results": true
     }
 }
 

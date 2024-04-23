@@ -475,16 +475,6 @@ def create_butterworth_low_pass_filter(width, height, d, n):
             lp_filter[j, i] = 1 / (1 + math.pow((radius / d), (2 * n)))
     return lp_filter
 
-def create_butterworth_bp_filter(width, height, n, d0, d1):
-    bp_filter = np.zeros((height, width, 2), np.float32)
-    centre = (width / 2, height / 2)
-
-    for i in range(0, bp_filter.shape[1]):  # image width
-        for j in range(0, bp_filter.shape[0]):  # image height
-            break
-
-    return bp_filter
-
 def band_pass(grey_img, radius_small, radius_big):
     '''
     from amir github
@@ -502,7 +492,8 @@ def band_pass(grey_img, radius_small, radius_big):
     dft_shifted = np.fft.fftshift(dft)
 
     # do the filtering
-    bp_filter = create_band_pass_filter(nwidth, nheight, radius_small, radius_big)
+    # bp_filter = create_band_pass_filter(nwidth, nheight, radius_small, radius_big)
+    bp_filter = create_butterworth_low_pass_filter(nwidth, nheight, radius_big, 2)
 
     dft_filtered = cv2.mulSpectrums(dft_shifted, bp_filter, flags=0)
 
@@ -512,8 +503,7 @@ def band_pass(grey_img, radius_small, radius_big):
 
     # normalized the filtered image into 0 -> 255 (8-bit grayscale) so we
     # can see the output
-    min_val, max_val, min_loc, max_loc = \
-        cv2.minMaxLoc(filtered_img[:, :, 0])
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(filtered_img[:, :, 0])
     filtered_img_normalised = filtered_img[:, :, 0] * (
         1.0 / (max_val - min_val)) + ((-min_val) / (max_val - min_val))
     filtered_img_normalised = np.uint8(filtered_img_normalised * 255)
@@ -537,7 +527,6 @@ def band_pass(grey_img, radius_small, radius_big):
             norm_type=cv2.NORM_MINMAX)
 
     return filtered_img_normalised, magnitude_spectrum_normalised
-
 
 # Main function
 def process_image(image):

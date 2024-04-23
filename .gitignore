@@ -2,7 +2,8 @@
 Results/
 
 # DONT INCLUDE THESE FILES IN COMMIT
-image_processing_files
+image_processing_files/
+
 
 ## GitHub-supplied gitignore file for Python below this line ##
 

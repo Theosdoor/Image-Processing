@@ -35,7 +35,6 @@ def fix_perspective(image):
 
     # laplaciam edge detection
     mask = cv2.Laplacian(mask, cv2.CV_8U, ksize=7)
-    # mask = cv2.Canny(mask, 100, 300)
 
     # extract contours (only need extreme outer contours)
     contours, _ = cv2.findContours(mask, mode = cv2.RETR_EXTERNAL, method = cv2.CHAIN_APPROX_SIMPLE)
@@ -45,7 +44,7 @@ def fix_perspective(image):
     square_mask = np.zeros((height, width), np.uint8)
     cv2.drawContours(square_mask, contours, -1, (255, 255, 255), 1)
 
-    # get 4 corners of xray image
+    # get 4 corners of xray image using Shi-Tomasi method (through OpenCV)
     corners = cv2.goodFeaturesToTrack(square_mask, 4, 0.01, 10)
     corners = corners.reshape(4, 2)
 
@@ -348,179 +347,33 @@ class Criminisi_Inpainter():
             dest_patch[1][0]:dest_patch[1][1]+1
         ] = data
 
-def create_band_pass_filter(width, height, radius_small, radius_big):
-    '''
-    from amir github
-    '''
-    assert(radius_big > radius_small)
-
-    bp_filter = np.ones((height, width, 2), np.float32)
-    cv2.circle(bp_filter, (int(width / 2), int(height / 2)),
-               radius_big, (0, 0, 0), thickness=-1)
-
-    cv2.circle(bp_filter, (int(width / 2), int(height / 2)),
-               radius_small, (1, 1, 1), thickness=-1)
-
-    return bp_filter
-
-def create_butterworth_high_pass_filter(width, height, d, n):
-    hp_filter = np.zeros((height, width, 2), np.float32)
-    centre = (width / 2, height / 2)
-
-    for i in range(0, hp_filter.shape[1]):  # image width
-        for j in range(0, hp_filter.shape[0]):  # image height
-            radius = max(1, math.sqrt(math.pow((i - centre[0]), 2.0) + math.pow((j - centre[1]), 2.0)))
-            hp_filter[j, i] = 1 / (1 + math.pow((d / radius), (2 * n)))
-    return hp_filter
-
-def create_butterworth_low_pass_filter(width, height, d, n):
-    lp_filter = np.zeros((height, width, 2), np.float32)
-    centre = (width / 2, height / 2)
-
-    for i in range(0, lp_filter.shape[1]):  # image width
-        for j in range(0, lp_filter.shape[0]):  # image height
-            radius = max(1, math.sqrt(math.pow((i - centre[0]), 2.0) + math.pow((j - centre[1]), 2.0)))
-            lp_filter[j, i] = 1 / (1 + math.pow((radius / d), (2 * n)))
-    return lp_filter
-
-def band_pass(grey_img, radius_small, radius_big):
-    '''
-    from amir github
-    '''
-    assert(radius_big > radius_small)
-    height, width = grey_img.shape[:2]
-
-    # set up optimized DFT settings
-    nheight = cv2.getOptimalDFTSize(height)
-    nwidth = cv2.getOptimalDFTSize(width)
-
-    # perform the DFT and get complex output
-    dft = cv2.dft(np.float32(grey_img), flags=cv2.DFT_COMPLEX_OUTPUT)
-
-    dft_shifted = np.fft.fftshift(dft)
-
-    # do the filtering
-    # bp_filter = create_band_pass_filter(nwidth, nheight, radius_small, radius_big)
-    bp_filter = create_butterworth_low_pass_filter(nwidth, nheight, radius_big, 2)
-
-    dft_filtered = cv2.mulSpectrums(dft_shifted, bp_filter, flags=0)
-
-    inv_dft = np.fft.fftshift(dft_filtered)
-
-    filtered_img = cv2.dft(inv_dft, flags=cv2.DFT_INVERSE)
-
-    # normalized the filtered image into 0 -> 255 (8-bit grayscale) so we
-    # can see the output
-    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(filtered_img[:, :, 0])
-    filtered_img_normalised = filtered_img[:, :, 0] * (
-        1.0 / (max_val - min_val)) + ((-min_val) / (max_val - min_val))
-    filtered_img_normalised = np.uint8(filtered_img_normalised * 255)
-
-    # calculate the magnitude spectrum and log transform + scale it for
-    # visualization
-    magnitude_spectrum = cv2.magnitude(dft_filtered[:, :, 0], dft_filtered[:, :, 1])
-    magnitude_spectrum += .4 # avoid log(0)
-    magnitude_spectrum = np.log(magnitude_spectrum)
-    
-    # create a 8-bit image to put the magnitude spectrum into
-    magnitude_spectrum_normalised = np.zeros((nheight, nwidth, 1), np.uint8)
-
-    # normalized the magnitude spectrum into 0 -> 255 (8-bit grayscale) so
-    # we can see the output
-    cv2.normalize(
-            np.uint8(magnitude_spectrum),
-            magnitude_spectrum_normalised,
-            alpha=0,
-            beta=255,
-            norm_type=cv2.NORM_MINMAX)
-
-    return filtered_img_normalised, magnitude_spectrum_normalised
-
 # Main function
 def process_image(image):
     '''
     Process xray image. Keeps same resolution.
     '''
-    # fix warped perspective
+    # STEP 1 - unwarp perspective ===========================
     image = fix_perspective(image)
     # image = cv2.imread('sample-xray98.png', cv2.IMREAD_COLOR)
         
-    # fix colour channel imbalance (green sections are white)
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(image)
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv_image)
 
-    # v, mag_spec = band_pass(v, 10, 50)
+    # plot hue
+    if isTesting:
+        plt.figure()
+        plt.grid()
+        hist = cv2.calcHist([h], [0], None, [200], [0, 200])
+        plt.plot(hist)
+        plt.xlim([0, 180])
+        plt.ylim([0, 7000])
+        plt.xticks(np.arange(0, 180, 20), rotation=45)
+        plt.savefig('hist_hue_BEFORE.png')
 
-    # # plot hue
-    # if isTesting:
-    #     plt.figure()
-    #     plt.grid()
-    #     hist = cv2.calcHist([h], [0], None, [200], [0, 200])
-    #     plt.plot(hist)
-    #     plt.xlim([0, 180])
-    #     plt.ylim([0, 7000])
-    #     plt.xticks(np.arange(0, 180, 20), rotation=45)
-    #     plt.savefig('histogram_hue.png')
-
-    # # isolate green hue range
-    # # hue_range = cv2.inRange(h, 43, 80)
-
-
-    # # morph_close to join up green regions
-    # # kernel = np.ones((5, 5), np.uint8)
-    # # hue_range = cv2.morphologyEx(hue_range, cv2.MORPH_CLOSE, kernel, iterations=2)
-
-    # # clip so all still green
-    # # hue_range.clip(43, 80)
-
-    # # v[hue_range == 0] = 0 # to see green elements only
-    # # h[hue_range > 0] = 1
-
-    # gamma = 0.9
-    # lookUpTable = np.empty((1,256), np.uint8)
-    # for i in range(256):
-    #     lookUpTable[0,i] = np.clip(pow(i / 255.0, gamma) * 255.0, 0, 255)
-    
-    # # s[hue_range > 0] += 2 # so that it is not 0 or 1
-    # # s = cv2.LUT(s, lookUpTable)
-
-    image = cv2.merge((h, s, v))
-    image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
-
-
+    # STEP 2 - inpaint ====================================
 
     # greyscale
     grey_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # bleached = cv2.inRange(grey_img, 215,225)
-
-    # image_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    # h, s, v = cv2.split(image_hsv)
-
-    # white_pix = np.argwhere(bleached > 0)
-
-    # # get normal distribution between 40 and 80
-    # mean = 60
-    # std = 10
-    # h[bleached > 0] = np.random.normal(mean, std, len(white_pix))
-
-    # image = cv2.merge((h, s, v))
-    # image = cv2.cvtColor(image, cv2.COLOR_HSV2BGR)
-
-    # # plot hue
-    # if isTesting:
-    #     plt.figure()
-    #     plt.grid()
-    #     hist = cv2.calcHist([h], [0], None, [200], [0, 200])
-    #     plt.plot(hist)
-    #     plt.xlim([0, 180])
-    #     plt.ylim([0, 7000])
-    #     plt.xticks(np.arange(0, 180, 20), rotation=45)
-    #     plt.savefig('hist_hue.png')
-
-    # # return image
-
-    # ===========================
 
     # create mask of missing region for inpainting
     inpainting_mask = cv2.inRange(grey_img, 0, 10)
@@ -551,12 +404,16 @@ def process_image(image):
     # image = inpainter.inpaint()
     image = cv2.inpaint(image, inpainting_mask, 3, cv2.INPAINT_TELEA)
 
+    # STEP 3 - denoising ==================================
+
     ## remove s&p
     image = cv2.medianBlur(image, 3)
 
     ## remove gaussian noise
 
-    # nl means
+    # nl means (converts to lab for filtering)
+    # h corresponds to filter strength in l channel
+    # hColor corresponds to filter strength in a and b channels
     image = cv2.fastNlMeansDenoisingColored(
         image, None, h=7, hColor=1,
         templateWindowSize=9, searchWindowSize=31)
@@ -570,60 +427,48 @@ def process_image(image):
     #     image, d=9, sigmaColor=75, sigmaSpace=75,
     #     borderType=cv2.BORDER_DEFAULT)
 
-    return image
+    # STEP 4 - Colour =====================================
 
-    # ===========================
-
-    # convert to l*a*b* colour space
+    # RGB --> LAB
+    # l = lightness, a = green-->red, b = blue-->yellow
     image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(image)
 
-    gamma = 1.2
+    gamma = .99
     lookUpTable = np.empty((1,256), np.uint8)
     for i in range(256):
         lookUpTable[0,i] = np.clip(pow(i / 255.0, gamma) * 255.0, 0, 255)
     
     # l = cv2.LUT(l, lookUpTable)
 
+    # give more weight to green (from red) (-ve = more weight to red)
+    red_weight = 0.91
+    yel_weight = 1
+    a = np.clip(a * red_weight, 0, 255).astype(np.uint8)
+    b = np.clip(b * yel_weight, 0, 255).astype(np.uint8)
+
     # hist eq on l channel
     tile_size = 4
-    clahe = cv2.createCLAHE(clipLimit=2.6, # b/t 2.3-3.2
+    clahe = cv2.createCLAHE(clipLimit=3.15, # b/t 2.3-3.2
                             tileGridSize=(tile_size, tile_size))
     # l = clahe.apply(l)
 
-    # put channels back together
+    # LAB to BGR
     image = cv2.merge((l, a, b))
-
-    # plot lab channels
-    # plt.figure()
-    # for i in range(3):
-    #     hist = cv2.calcHist([image], [i], None, [256], [0, 256])
-    #     plt.plot(hist)
-    #     plt.xlim([1, 256])
-    # plt.legend(['l', 'a', 'b'])
-    # plt.savefig('histogram_lab.png')
-
-    # convert back to BGR
     image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
 
-    b, g, r = cv2.split(image)
+    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv_image)
 
-    tile_size = 4
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(tile_size, tile_size))
-    # b = clahe.apply(b)
-    # r = clahe.apply(r)
-
-    image = cv2.merge((b, g, r))
-
-    # show histogram of bgr channels
-    # plt.figure()
-    # colours = ['b', 'g', 'r']
-    # for i in range(3):
-    #     hist = cv2.calcHist([image], [i], None, [256], [1, 256])
-    #     plt.plot(hist, color=colours[i])
-    #     plt.xlim([1, 256])
-    # plt.legend(['b', 'g', 'r'])
-    # plt.savefig('histogram_rgb.png')
+    if isTesting:
+        plt.figure()
+        plt.grid()
+        hist = cv2.calcHist([h], [0], None, [200], [0, 200])
+        plt.plot(hist)
+        plt.xlim([0, 180])
+        plt.ylim([0, 7000])
+        plt.xticks(np.arange(0, 180, 20), rotation=45)
+        plt.savefig('hist_hue_AFTER.png')
 
     return image
 
@@ -634,16 +479,19 @@ healthy_1 = 'im001-healthy.jpg'
 healthy_4 = 'im004-healthy.jpg' # example on gc
 healthy_12 = 'im012-healthy.jpg' # small missing region
 healthy_31 = 'im031-healthy.jpg' # sample image
-healthy_42 = 'im042-healthy.jpg' # bad criminisi
 pneumonia_53 = 'im053-pneumonia.jpg'
 pneumonia_56 = 'im056-pneumonia.jpg' # bad contrast
 pneumonia_74 = 'im074-pneumonia.jpg' # hard to see red R
+pneumonia_97 = 'im097-pneumonia.jpg'
 pneumonia_98 = 'im098-pneumonia.jpg' # sample image
 pneumonia_100 = 'im100-pneumonia.jpg'
 
-img_name = pneumonia_98
+img_name = pneumonia_97
 # TESTING ======================================================================
 start_time = time.time()
+
+# set start point
+start_from = None
 
 # load images & process
 for tag in os.listdir(path_to_images):
@@ -654,6 +502,12 @@ for tag in os.listdir(path_to_images):
     # FOR TEST
     if tag != img_name and isTesting:
         continue
+
+    # skip tags up to start_from. start_from = None to not skip any.
+    if tag != start_from and start_from != None and not isTesting:
+        print(tag + " skipped.")
+        continue
+    start_from = None
 
     img_path = os.path.join(path_to_images, tag)
     img_loaded = cv2.imread(img_path, cv2.IMREAD_COLOR)
