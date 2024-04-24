@@ -107,6 +107,7 @@ class Criminisi_Inpainter():
         c = 0
         # loop until whole region is filled
         while True:
+            # get fill front
             self._find_front()
 
             if self.show_progress:
@@ -115,9 +116,12 @@ class Criminisi_Inpainter():
 
             self._update_priorities()
 
+            # target pixel == highest priority
             target_pixel = self._find_highest_priority_pixel()
+
             find_start_time = time.time()
             source_patch = self._find_source_patch(target_pixel)
+
             if self.verbose:
                 print('Time to find best: %.2f seconds' % (time.time()-find_start_time))
 
@@ -165,9 +169,14 @@ class Criminisi_Inpainter():
 
     def _update_confidence(self):
         new_confidence = np.copy(self.confidence)
-        front_positions = np.argwhere(self.front > 0) # get list of pixels on fill front
+
+        # list pix on fill front
+        front_positions = np.argwhere(self.front > 0)
+        # iterate through them
         for point in front_positions:
-            patch = self._get_patch(point)
+            patch = self._get_patch(point) # patch centred at p
+
+            # update confidence of pixel p as in Criminisi paper
             new_confidence[point[0], point[1]] = np.sum(np.sum(
                 self.confidence[patch[0][0]:patch[0][1]+1,
                                 patch[1][0]:patch[1][1]+1]
@@ -206,9 +215,9 @@ class Criminisi_Inpainter():
         norm = np.sqrt(y_normal**2 + x_normal**2)
         # reshape norm to 3D
         norm = norm.reshape(height, width, 1).repeat(2, axis=2)
-        norm[norm == 0] = 1 # avoid division by zero
+        norm[norm == 0] = 1 # avoid div by zero
 
-        # return unit vector of normal
+        # return unit vctr of normal
         unit_normal = normal/norm
         return unit_normal
 
@@ -223,9 +232,14 @@ class Criminisi_Inpainter():
         gradient_val = np.sqrt(gradient[0]**2 + gradient[1]**2) # get magnitude of gradient
         max_gradient = np.zeros([height, width, 2]) # init matrix to store max gradient
 
-        front_positions = np.argwhere(self.front > 0)
+        front_positions = np.argwhere(self.front > 0) # get pixels on front
+
+        # for each pixel on front:
         for p in front_positions:
+            # get patch centred on p
             patch = self._get_patch(p)
+
+            # get y gradient and x gradient of patch
             patch_y_gradient = gradient[0][
                 patch[0][0]:patch[0][1]+1,
                 patch[1][0]:patch[1][1]+1
@@ -234,19 +248,24 @@ class Criminisi_Inpainter():
                 patch[0][0]:patch[0][1]+1,
                 patch[1][0]:patch[1][1]+1
                 ]
+            
+            # get gradient values in patch
             patch_gradient_val = gradient_val[
                 patch[0][0]:patch[0][1]+1,
                 patch[1][0]:patch[1][1]+1
                 ]
 
+            # get position of max gradient in patch
             patch_max_pos = np.unravel_index(
                 patch_gradient_val.argmax(),
                 patch_gradient_val.shape
             )
 
+            # store max gradient for pixel p
             max_gradient[p[0], p[1], 0] = patch_y_gradient[patch_max_pos]
             max_gradient[p[0], p[1], 1] = patch_x_gradient[patch_max_pos]
 
+        # return matrix of max gradient for all pix on fill front
         return max_gradient
 
     def _find_highest_priority_pixel(self):
@@ -254,55 +273,79 @@ class Criminisi_Inpainter():
         return point
 
     def _find_source_patch(self, target_pixel):
-        target_patch = self._get_patch(target_pixel)
+        '''
+        Given a target pixel, find its patch & get the best source patch for inpainting it.
+        '''
+        target_patch = self._get_patch(target_pixel) # get patch centred on target pixel
         height, width = self.working_image.shape[:2]
         patch_height = (1+target_patch[0][1]-target_patch[0][0])
         patch_width = (1+target_patch[1][1]-target_patch[1][0])
 
+        # init best match so far and difference (euclidean distance) from target patch
         best_match = None
         best_match_difference = 0
 
+        # use lab space since being perceptually uniform means
+        # euclidean distance more closely represents perceptual difference
         lab_image = cv2.cvtColor(self.working_image, cv2.COLOR_BGR2LAB)
 
+        # check all patches in image
         for y in range(height - patch_height + 1):
             for x in range(width - patch_width + 1):
                 source_patch = [
                     [y, y + patch_height-1],
                     [x, x + patch_width-1]
                 ]
+                # skip if source patch overlaps with the region still to be filled in
                 if self._patch_data(self.working_mask, source_patch).sum() != 0:
                     continue
 
+                # compare differences between target and source patches
+                # using sum of squared distances between already filled-in pix
                 difference = self._calc_patch_difference(
                     lab_image,
                     target_patch,
                     source_patch
                 )
 
+                # update best match if improved
                 if best_match is None or difference < best_match_difference:
                     best_match = source_patch
                     best_match_difference = difference
         return best_match
 
     def _update_image(self, target_pixel, source_patch):
+        '''
+        Fill in 'empty' pix in target patch using source patch.
+        '''
         target_patch = self._get_patch(target_pixel)
+
+        # get pix in target patch to be filled in
         pixels_positions = np.argwhere(
             self._patch_data(
                 self.working_mask,
                 target_patch
             ) > 0
         ) + [target_patch[0][0], target_patch[1][0]]
+
+        # set confidence of these unfilled pix to be same as target pixel
         patch_confidence = self.confidence[target_pixel[0], target_pixel[1]]
         for point in pixels_positions:
             self.confidence[point[0], point[1]] = patch_confidence
 
+        # get section of mask to be filled in this iteration
         mask = self._patch_data(self.working_mask, target_patch)
-        rgb_mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        bgr_mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+
+        # get source and target patches in actual image
         source_data = self._patch_data(self.working_image, source_patch)
         target_data = self._patch_data(self.working_image, target_patch)
 
-        new_data = source_data*rgb_mask + target_data*(1-rgb_mask)
+        # new data from source patch where mask is 1 (to fill in),
+        # target patch where mask is 0 (already filled)
+        new_data = source_data*bgr_mask + target_data*(1-bgr_mask)
 
+        # update working image and mask
         self._copy_to_patch(
             self.working_image,
             target_patch,
@@ -330,22 +373,31 @@ class Criminisi_Inpainter():
         return patch
 
     def _calc_patch_difference(self, image, target_patch, source_patch):
-        mask = 1 - self._patch_data(self.working_mask, target_patch)
-        rgb_mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        target_data = self._patch_data(
-            image,
-            target_patch
-        ) * rgb_mask
-        source_data = self._patch_data(
-            image,
-            source_patch
-        ) * rgb_mask
-        squared_distance = np.sum(((target_data - source_data)**2))
+
+        # get mask of target patch
+        mask = 1 - self.working_mask[
+            target_patch[0][0]:target_patch[0][1]+1,
+            target_patch[1][0]:target_patch[1][1]+1
+            ]
+        bgr_mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+
+        # get data from patches
+        target_data = image[
+            target_patch[0][0]:target_patch[0][1]+1,
+            target_patch[1][0]:target_patch[1][1]+1
+        ] * bgr_mask
+        source_data = image[
+            source_patch[0][0]:source_patch[0][1]+1,
+            source_patch[1][0]:source_patch[1][1]+1
+         ] * bgr_mask
+        # sum of squared distances (SSD) between target and source patches
+        ssd = np.sum(((target_data - source_data)**2))
+        # tie-breaker factor is euclidean dist between patch centres
         euclidean_distance = np.sqrt(
             (target_patch[0][0] - source_patch[0][0])**2 +
             (target_patch[1][0] - source_patch[1][0])**2
-        )  # tie-breaker factor
-        return squared_distance + euclidean_distance
+        )
+        return ssd + euclidean_distance
 
     @staticmethod
     def _patch_shape(patch):
@@ -365,76 +417,6 @@ class Criminisi_Inpainter():
             dest_patch[1][0]:dest_patch[1][1]+1
         ] = data
 
-def criminisi_inpaint(src, target, patch_size = 9, search_size = 15, max_iter = 1000):
-    height, width = src.shape[:2]
-    mask = target.copy()
-    grey_img = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
-
-    # confidence values for each pixel
-    # initialised at 1 for missing region, 0 for known region
-    # i.e. 1 - binary target mask
-    C = (1.0 - target)
-    # data values for each pixel
-    D = np.zeros((height, width), np.uint8)
-    # priority values for each pixel
-    P = np.zeros((height, width), np.uint8)
-    
-    # repeat until region filled
-    for it in range(max_iter):
-        # identify fill front and filter out negative values
-        # fill_front = cv2.Canny(target, 100, 200)
-        fill_front = cv2.Laplacian(mask, cv2.CV_8U, ksize=3)
-
-        # if fill front empty, break
-        if np.sum(fill_front) == 0:
-            break
-
-        # update priorities of patches centred on fill front
-        front_positions = np.argwhere(fill_front > 0)
-        for i in range(len(front_positions)):
-            p = front_positions[i]
-            # get patch centred at p
-            # NOTE watchout for boundary patches?
-            patch = [[p[0]-patch_size//2, p[1]-patch_size//2],
-                        [p[0]+patch_size//2, p[1]+patch_size//2]]
-            
-            # update confidence values
-            # C(p) = sum(confidence of pixels in patch) / patch area
-            C[p[0], p[1]] = np.sum(C[p[0]-patch_size//2 : p[0]+patch_size//2+1,
-                                     p[1]-patch_size//2 : p[1]+patch_size//2+1]) / patch_size**2
-            
-            # update data values
-            # D(p) = magnitude(isophote at p * normal to ff at p) / alpha
-            # NOTE use matrix mult to speed up?
-            alpha = 255
-
-            ## normal to fill front at p
-            # imagine tangent line between two points either side of p on fill front
-            if i == 0:
-                preceding = front_positions[-1]
-                successive = front_positions[i+1]
-            elif i == len(front_positions) - 1:
-                preceding = front_positions[i-1]
-                successive = front_positions[0]
-            else:
-                preceding = front_positions[i-1]
-                successive = front_positions[i+1]
-            # gradient of normal = -1 / gradient of tangent
-            normal_grad =  -(successive[1] - preceding[1]) / (successive[0] - preceding[0])
-            # get unit vector normal through p
-            normal = np.array([1, normal_grad])
-            print(normal)
-            exit()
-            normal = normal / np.linalg.norm(normal)
-
-            ## isophote at p = max image gradient in patch
-            # get image gradient in patch
-            
-
-        break
-
-    return src
-
 # Main function
 def process_image(image):
     '''
@@ -443,9 +425,22 @@ def process_image(image):
     # fix warped perspective
     image = fix_perspective(image)
 
-    # create binary mask of missing region for inpainting
+    # create mask of missing region for inpainting
     grey_img = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     inpainting_mask = cv2.inRange(grey_img, 0, 10)
+    
+    # add 10-pixel-wide black edge (dont inpaint black border)
+    border_width = 10
+    inpainting_mask[:border_width, :] = 0
+    inpainting_mask[-border_width:, :] = 0
+    inpainting_mask[:, :border_width] = 0
+    inpainting_mask[:, -border_width:] = 0
+    
+    # dilate mask to expand missing region
+    dilation_kernel = np.ones((4, 3), np.uint8)
+    inpainting_mask = cv2.dilate(inpainting_mask, dilation_kernel, iterations=1)
+
+    # turn into binary mask
     inpainting_mask[inpainting_mask > 0] = 1
 
     inpainter = Criminisi_Inpainter(image, inpainting_mask, patch_size=15, verbose=True, show_progress=False)

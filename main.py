@@ -59,15 +59,18 @@ def fix_perspective(image):
 
     # sort corners of ROI to align with corners of frame
     # such that map_from[i] is closest corner to map_to[i]
-    for i in range(len(map_to)):
-        min_dist = 1000000
+    for i in range(len(map_to)): # iterate through map_to
+        min_dist = float('inf')
+        # for each corner found by Shi-Tomasi:
         for c in corners:
+            # use numpy to get euclidean distance (l2 norm) between 2 points
             dist = np.linalg.norm(c - map_to[i])
             if dist < min_dist:
+                # update closest corner to map_to[i]
                 min_dist = dist
-                map_from[i] = c
+                map_from[i] = c # i.e. c is closest corner to map_to[i] found
     
-    # shift perspective
+    # shift perspective using perspective transform
     M = cv2.getPerspectiveTransform(np.array(map_from, np.float32), np.array(map_to, np.float32))
     image = cv2.warpPerspective(image, M, (width, height))
 
@@ -355,12 +358,12 @@ def process_image(image):
     # STEP 1 - unwarp perspective ===========================
     image = fix_perspective(image)
     # image = cv2.imread('sample-xray98.png', cv2.IMREAD_COLOR)
-        
-    hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv_image)
 
-    # plot hue
     if isTesting:
+        # plot hue hist
+        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        h = hsv_image[:, :, 0]
+
         plt.figure()
         plt.grid()
         hist = cv2.calcHist([h], [0], None, [200], [0, 200])
@@ -370,6 +373,16 @@ def process_image(image):
         plt.xticks(np.arange(0, 180, 20), rotation=45)
         plt.savefig('hist_hue_BEFORE.png')
 
+        # plot hist of rgb channels
+        plt.figure()
+        plt.grid()
+        colours = ['b', 'g', 'r']
+        for i in range(3):
+            hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+            plt.plot(hist, color=colours[i])
+        plt.xlim([0, 256])
+        plt.savefig('hist_rgb_BEFORE.png')
+
     # STEP 2 - inpaint ====================================
 
     # greyscale
@@ -378,7 +391,8 @@ def process_image(image):
     # create mask of missing region for inpainting
     inpainting_mask = cv2.inRange(grey_img, 0, 10)
     
-    # add 10-pixel-wide black edge (dont inpaint black border)
+    # add 10-pixel-wide black edge to mask 
+    # (dont inpaint image's existing black border)
     border_width = 10
     inpainting_mask[:border_width, :] = 0
     inpainting_mask[-border_width:, :] = 0
@@ -386,6 +400,7 @@ def process_image(image):
     inpainting_mask[:, -border_width:] = 0
     
     # dilate mask to expand missing region
+    # (this overlaps region to be inpainted with known region, so more seamless inpainting)
     dilation_kernel = np.ones((4, 3), np.uint8)
     inpainting_mask = cv2.dilate(inpainting_mask, dilation_kernel, iterations=1)
 
@@ -404,7 +419,7 @@ def process_image(image):
     # image = inpainter.inpaint()
     image = cv2.inpaint(image, inpainting_mask, 3, cv2.INPAINT_TELEA)
 
-    # STEP 3 - denoising ==================================
+    # STEP 3 - noise filtering ==============================
 
     ## remove s&p
     image = cv2.medianBlur(image, 3)
@@ -415,24 +430,46 @@ def process_image(image):
     # h corresponds to filter strength in l channel
     # hColor corresponds to filter strength in a and b channels
     image = cv2.fastNlMeansDenoisingColored(
-        image, None, h=7, hColor=1,
+        image, None, h=12, hColor=1.5,
         templateWindowSize=9, searchWindowSize=31)
+    return image
 
-    # sharpen edges
-    laplacian = cv2.Laplacian(image, cv2.CV_8U, ksize=1)
+    ## sharpen edges
+    # image = cv2.GaussianBlur(image, (3, 3), 0)
+    lap_kernel = np.array([
+        [0, 1, 0],
+        [1, -4, 1],
+        [0, 1, 0]
+        ])
+    laplacian = cv2.filter2D(image, cv2.CV_8U, lap_kernel)
+    # laplacian = cv2.Laplacian(image, cv2.CV_8U, ksize=1)
+    # Note: ksize == 1 means filter using 3x3 kernel (otherwise uses Sobel):
+        # [0, 1, 0]
+        # [1, -4, 1]
+        # [0, 1, 0]
     image = cv2.subtract(image, laplacian)
+    return image
 
-    # bilateral filter
-    # image = cv2.bilateralFilter(
-    #     image, d=9, sigmaColor=75, sigmaSpace=75,
-    #     borderType=cv2.BORDER_DEFAULT)
+    # STEP 4 - Colour and contrast ==========================
+    b, g, r = cv2.split(image)
 
-    # STEP 4 - Colour =====================================
+    # gamma correction to colour channel
+    gamma = 0.8
+    # image[:, :, 1] = ((np.power(image[:, :, 1] / 255, gamma)) * 255).astype(np.uint8)
+
+    gain = 1
+    bias = 0
+    # blue = cv2.convertScaleAbs(blue, alpha=gain, beta=bias)
+
+    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4, 4))
+    # image[:, :, 0] = clahe.apply(image[:, :, 0])
+
+    # image = cv2.merge((b, g, r))
 
     # RGB --> LAB
     # l = lightness, a = green-->red, b = blue-->yellow
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(image)
+    lab_image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab_image)
 
     gamma = .99
     lookUpTable = np.empty((1,256), np.uint8)
@@ -441,26 +478,42 @@ def process_image(image):
     
     # l = cv2.LUT(l, lookUpTable)
 
-    # give more weight to green (from red) (-ve = more weight to red)
-    red_weight = 0.91
-    yel_weight = 1
-    a = np.clip(a * red_weight, 0, 255).astype(np.uint8)
-    b = np.clip(b * yel_weight, 0, 255).astype(np.uint8)
+    # give more weight to green (from red) (alpha > 1 / beta > 0 = more weight to red)
+    red_alpha = .91
+    red_beta = 0
+    a = cv2.convertScaleAbs(a, alpha=red_alpha, beta=red_beta)
+
+    # adjust weight between yellow and blue (alpha > 1 / beta > 0 = more weight to yellow)
+    yellow_alpha = 1.1
+    yellow_beta = 20
+    # b = cv2.convertScaleAbs(b, alpha=yellow_alpha, beta=yellow_beta)
 
     # hist eq on l channel
     tile_size = 4
-    clahe = cv2.createCLAHE(clipLimit=3.15, # b/t 2.3-3.2
+    clahe = cv2.createCLAHE(clipLimit=3.15, # between 2.3-3.2
                             tileGridSize=(tile_size, tile_size))
     # l = clahe.apply(l)
 
     # LAB to BGR
-    image = cv2.merge((l, a, b))
-    image = cv2.cvtColor(image, cv2.COLOR_LAB2BGR)
+    lab_image = cv2.merge((l, a, b))
+    image = cv2.cvtColor(lab_image, cv2.COLOR_LAB2BGR)
 
     hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     h, s, v = cv2.split(hsv_image)
 
+    # threshold blue in h
+    blue_mask = cv2.inRange(h, 90, 100)
+
+    # v[blue_mask == 0] = 0 # show only blue regions
+
+    # reduce blue regions
+    # s[blue_mask > 0] = 0.5 * s[blue_mask > 0]
+    
+    hsv_image = cv2.merge((h, s, v))
+    # image = cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
+
     if isTesting:
+        # plot hue
         plt.figure()
         plt.grid()
         hist = cv2.calcHist([h], [0], None, [200], [0, 200])
@@ -469,6 +522,17 @@ def process_image(image):
         plt.ylim([0, 7000])
         plt.xticks(np.arange(0, 180, 20), rotation=45)
         plt.savefig('hist_hue_AFTER.png')
+
+        # plot hist of rgb channels
+        plt.figure()
+        plt.grid()
+        colours = ['b', 'g', 'r']
+        for i in range(3):
+            hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+            plt.plot(hist, color=colours[i])
+        plt.xlim([0, 256])
+        plt.ylim([0, 4000])
+        plt.savefig('hist_rgb_AFTER.png')
 
     return image
 
