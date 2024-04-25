@@ -4,7 +4,7 @@
 By default, the images inside image_processing_files/xray_images are processed. To specify a directory of images to process, inside project's directory run
 ```
 python3 main.py unseen_test_images
-```.
+```
 
 If you want to start the processing partway through the image directory, set `start_from` variable at bottom of main.py to name of desired start point in directory. 
 
