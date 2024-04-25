@@ -1,6 +1,6 @@
 # DONT INCLUDE THESE FILES IN COMMIT
 image_processing_files/
-Results/
+.vscode/
 
 ## GitHub-supplied gitignore file for Python below this line ##
 
