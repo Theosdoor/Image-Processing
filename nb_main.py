@@ -13,15 +13,18 @@ except IndexError:
     # default path
     path_to_images = 'image_processing_files/xray_images'
 
+# global variables
+results_dir = 'Results'
+
 # create results directory if doesnt already exist
-if not os.path.isdir('Results'):
-    os.mkdir('Results')
+if not os.path.isdir(results_dir):
+    os.mkdir(results_dir)
 
 # delete contents of results directory if wanted
 refreshResults = False
 if refreshResults:
-    for file in os.listdir('Results'):
-        os.remove(os.path.join('Results', file))
+    for file in os.listdir(results_dir):
+        os.remove(os.path.join(results_dir, file))
 
 
 # %%
@@ -191,7 +194,7 @@ for tag in os.listdir(path_to_images):
     # check it has loaded
     if img_loaded is not None:
         processed = process_image(img_loaded)
-        cv2.imwrite(os.path.join('Results', tag), processed)
+        cv2.imwrite(os.path.join(results_dir, tag), processed)
         # print('Successfully processed ' + tag + '!')
     else:
         print(tag + " failed to load.")

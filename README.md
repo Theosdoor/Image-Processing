@@ -1,5 +1,9 @@
 # X-Ray Image Processing Coursework
 
+![Figure 1 - Image Processing Pipeline](figure1.png)
+
+*Figure 1 - image processing pipeline. From left to right: original image, perspective warping, inpainting, noise filtering, colour and contrast adjustment*
+
 This repo implements exemplar-based inpainting (Criminisi 2004) on chest x-ray images using OpenCV and NumPy. A small classifier demo and a sample dataset are included under `image_processing_files/`.
 
 Project received 67% (2:1 classification)
@@ -16,15 +20,20 @@ Project received 67% (2:1 classification)
 
 ## Installation
 
-Requirements: Python 3.9+
-
-Install dependencies:
+This project uses `uv` for dependency management. First, install `uv` if you don't have it:
 
 ```bash
-pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then sync the dependencies:
+
+```bash
+uv sync
 ```
 
 ## Usage Guide
+
 By default, the images inside `image_processing_files/xray_images` are processed. To specify a different directory of images, from the project root run:
 
 ```bash
