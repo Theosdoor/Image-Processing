@@ -100,6 +100,9 @@ for filename in names:
                 correct += 1
 
 # print final accuracy:
-print(f'Accuracy is {correct/len(names)}')
+if len(names) > 0:
+    print(f'Accuracy is {correct / len(names)}')
+else:
+    print('No images found to classify')
 
 # ===================================================================

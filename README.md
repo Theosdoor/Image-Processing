@@ -2,7 +2,7 @@
 
 This repo implements exemplar-based inpainting (Criminisi 2004) on chest x-ray images using OpenCV and NumPy. A small classifier demo and a sample dataset are included under `image_processing_files/`.
 
-[INPUT COURSEWORK RESULTS]
+Project received 67% (2:1 classification)
 
 ## Project structure
 

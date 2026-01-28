@@ -9,7 +9,7 @@ from criminisi_inpainter import Criminisi_Inpainter
 
 try:
     path_to_images = sys.argv[1]  # path given as command line argument
-except:
+except IndexError:
     # default path
     path_to_images = 'image_processing_files/xray_images'
 
@@ -23,8 +23,10 @@ if refreshResults:
     for file in os.listdir('Results'):
         os.remove(os.path.join('Results', file))
 
+
 # %%
 # helper functions
+
 
 def fix_perspective(image):
     height, width = image.shape[:2]
@@ -55,9 +57,9 @@ def fix_perspective(image):
 
     # desired 4 corners after warp
     map_to = [[border_width, border_width],
-              [width-border_width, border_width],
-              [border_width, height-border_width],
-              [width-border_width, height-border_width]]
+              [width - border_width, border_width],
+              [border_width, height - border_width],
+              [width - border_width, height - border_width]]
     map_from = [[0., 0.]] * 4  # to store 4 corners of ROI
 
     # sort corners of ROI to align with corners of frame
@@ -80,8 +82,10 @@ def fix_perspective(image):
 
     return image
 
+
 # %%
 # Main function
+
 
 def process_image(image):
     '''
@@ -106,7 +110,8 @@ def process_image(image):
     inpainting_mask[:, -border_width:] = 0
 
     # dilate mask to expand missing region
-    # (this overlaps region to be inpainted with known region, so more seamless inpainting)
+    # (this overlaps region to be inpainted with known region,
+    # so more seamless inpainting)
     dilation_kernel = np.ones((4, 3), np.uint8)
     inpainting_mask = cv2.dilate(
         inpainting_mask, dilation_kernel, iterations=1)
@@ -140,25 +145,28 @@ def process_image(image):
 
     # STEP 4 - Colour and contrast ==========================
     # RGB --> LAB
-    # l = lightness, a = green-->red, b = blue-->yellow
+    # lightness_ch = lightness, a = green-->red, b = blue-->yellow
     lab_image = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab_image)
+    lightness_ch, a, b = cv2.split(lab_image)
 
-    # hist eq on l channel
+    # hist eq on lightness channel
     tile_size = 4
     clahe = cv2.createCLAHE(clipLimit=3,  # best between 2.3-3.2
                             tileGridSize=(tile_size, tile_size))
-    l = clahe.apply(l)
+    lightness_ch = clahe.apply(lightness_ch)
 
     # gamma correction
     gamma = 0.7
-    l = np.clip(np.power(l / 255.0, gamma) * 255.0, 0, 255).astype(np.uint8)
+    lightness_ch = np.clip(
+        np.power(lightness_ch / 255.0, gamma) * 255.0, 0, 255
+    ).astype(np.uint8)
 
     # LAB to BGR
-    lab_image = cv2.merge((l, a, b))
+    lab_image = cv2.merge((lightness_ch, a, b))
     image = cv2.cvtColor(lab_image, cv2.COLOR_LAB2BGR)
 
     return image
+
 
 # %%
 # MAIN LOOP
@@ -173,7 +181,7 @@ for tag in os.listdir(path_to_images):
         continue
 
     # skip tags up to start_from. start_from = None to not skip any.
-    if tag != start_from and start_from != None:
+    if tag != start_from and start_from is not None:
         continue
     start_from = None
 
@@ -181,7 +189,7 @@ for tag in os.listdir(path_to_images):
     img_loaded = cv2.imread(img_path, cv2.IMREAD_COLOR)
 
     # check it has loaded
-    if not img_loaded is None:
+    if img_loaded is not None:
         processed = process_image(img_loaded)
         cv2.imwrite(os.path.join('Results', tag), processed)
         # print('Successfully processed ' + tag + '!')
