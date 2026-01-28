@@ -44,12 +44,6 @@ Prepare the X-Ray Image Processing project for GitHub portfolio.
 - [ ] Add technical details about the Criminisi algorithm implementation
 - [ ] Document any modifications or improvements to the original algorithm
 
-### 6. Dependencies & Setup
-- [ ] Verify requirements.txt is complete and minimal
-- [ ] Consider migrating to pyproject.toml for modern Python packaging
-- [ ] Test installation process on fresh environment
-- [ ] Add Python version compatibility information
-
 ### 7. Final Polish
 - [ ] Proofread all documentation
 - [ ] Check for consistent markdown formatting
