@@ -175,7 +175,7 @@ def process_image(image):
 # MAIN LOOP
 
 # set start point
-start_from = 'im044-healthy.jpg'
+start_from = None
 
 # load images & process
 for tag in os.listdir(path_to_images):
