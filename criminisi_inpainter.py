@@ -221,48 +221,52 @@ class Criminisi_Inpainter():
         return point
 
     def _find_source_patch(self, target_pixel):
-        '''
-        Given a target pixel, find its patch & get the best source patch for inpainting it.
-        '''
-        target_patch = self._get_patch(
-            target_pixel)  # get patch centred on target pixel
-        height, width = self.working_image.shape[:2]
-        patch_height = (1+target_patch[0][1]-target_patch[0][0])
-        patch_width = (1+target_patch[1][1]-target_patch[1][0])
+        target_patch = self._get_patch(target_pixel)
+        ph = 1 + target_patch[0][1] - target_patch[0][0]
+        pw = 1 + target_patch[1][1] - target_patch[1][0]
 
-        # init best match so far and difference (euclidean distance) from target patch
-        best_match = None
-        best_match_difference = 0
+        lab_image = cv2.cvtColor(self.working_image, cv2.COLOR_BGR2LAB).astype(np.float32)
 
-        # use lab space since being perceptually uniform means
-        # euclidean distance more closely represents perceptual difference
-        lab_image = cv2.cvtColor(self.working_image, cv2.COLOR_BGR2LAB)
+        target_mask_2d = (1 - self.working_mask[
+            target_patch[0][0]:target_patch[0][1]+1,
+            target_patch[1][0]:target_patch[1][1]+1
+        ]).astype(np.float32)
 
-        # check all patches in image
-        for y in range(height - patch_height + 1):
-            for x in range(width - patch_width + 1):
-                source_patch = [
-                    [y, y + patch_height-1],
-                    [x, x + patch_width-1]
-                ]
-                # skip if source patch overlaps with the region still to be filled in
-                if self._patch_data(self.working_mask, source_patch).sum() != 0:
-                    continue
+        target_data = lab_image[
+            target_patch[0][0]:target_patch[0][1]+1,
+            target_patch[1][0]:target_patch[1][1]+1
+        ]
 
-                # compare differences between target and source patches
-                # using sum of squared distances between already filled-in pix
-                difference = self._calc_patch_difference(
-                    lab_image,
-                    target_patch,
-                    source_patch
-                )
+        # Masked SSD decomposition:
+        # sum(mask*(I-T)^2) = xcorr(I^2, mask) - 2*xcorr(I, mask*T) + const
+        # Computed per LAB channel and summed. Constant term omitted (doesn't affect argmin).
+        total_ssd = np.zeros((self.iheight - ph + 1, self.iwidth - pw + 1), dtype=np.float64)
+        for c in range(3):
+            I = lab_image[:, :, c]
+            T = target_data[:, :, c]
+            tm_T = (target_mask_2d * T).astype(np.float32)
+            term1 = cv2.matchTemplate((I**2).astype(np.float32), target_mask_2d, cv2.TM_CCORR)
+            term2 = cv2.matchTemplate(I.astype(np.float32), tm_T, cv2.TM_CCORR)
+            total_ssd += term1 - 2 * term2
 
-                # update best match if improved
-                if best_match is None or difference < best_match_difference:
-                    best_match = source_patch
-                    best_match_difference = difference
-        return best_match
+        # Reject source patches overlapping the unfilled region
+        mask_sum = cv2.filter2D(
+            self.working_mask.astype(np.float32), -1,
+            np.ones((ph, pw), np.float32),
+            anchor=(0, 0), borderType=cv2.BORDER_CONSTANT
+        )
+        total_ssd[mask_sum[:total_ssd.shape[0], :total_ssd.shape[1]] > 0] = np.inf
 
+        # Euclidean distance tie-breaker (identical to original)
+        ty = (target_patch[0][0] + target_patch[0][1]) / 2.0
+        tx = (target_patch[1][0] + target_patch[1][1]) / 2.0
+        ys = np.arange(total_ssd.shape[0]) + ph / 2.0
+        xs = np.arange(total_ssd.shape[1]) + pw / 2.0
+        total_ssd += np.sqrt((ys[:, None] - ty)**2 + (xs[None, :] - tx)**2)
+
+        loc = np.unravel_index(np.argmin(total_ssd), total_ssd.shape)
+        return [[loc[0], loc[0]+ph-1], [loc[1], loc[1]+pw-1]]
+    
     def _update_image(self, target_pixel, source_patch):
         '''
         Fill in 'empty' pix in target patch using source patch.
