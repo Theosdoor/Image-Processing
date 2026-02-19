@@ -48,7 +48,7 @@ class Criminisi_Inpainter():
         total = int(np.sum(self.mask))
 
         # loop until whole region is filled
-        with tqdm(total=total, desc='Inpainting', unit='px') as pbar:
+        with tqdm(total=total, desc='Inpainting', unit='px', leave=False) as pbar:
             while True:
                 # get fill front
                 self._find_front()

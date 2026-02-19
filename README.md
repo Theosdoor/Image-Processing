@@ -34,6 +34,11 @@ uv sync
 
 ## Usage Guide
 
+**Quick start**
+```bash
+python3 main.py
+```
+
 By default, the images inside `image_processing_files/xray_images` are processed. To specify a different directory of images, from the project root run:
 
 ```bash
