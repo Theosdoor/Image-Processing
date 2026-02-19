@@ -184,9 +184,11 @@ tags = [f for f in os.listdir(path_to_images) if f.endswith('.jpg')]
 # load images & process
 for tag in tqdm(tags, desc='Processing images'):
     # skip tags up to start_from. start_from = None to not skip any.
-    if tag != start_from and start_from is not None:
-        continue
-    start_from = None
+    if start_from is not None:
+        if tag == start_from:
+            start_from = None
+        else:
+            continue
 
     img_path = os.path.join(path_to_images, tag)
     img_loaded = cv2.imread(img_path, cv2.IMREAD_COLOR)
