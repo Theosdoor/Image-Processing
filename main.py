@@ -4,6 +4,7 @@ import os
 
 import cv2
 import numpy as np
+from tqdm import tqdm
 
 from criminisi_inpainter import Criminisi_Inpainter
 
@@ -177,12 +178,11 @@ def process_image(image):
 # set start point
 start_from = None
 
-# load images & process
-for tag in os.listdir(path_to_images):
-    if not tag.endswith('.jpg'):
-        # if not jpeg file then skip over it (eg .DS_Store file)
-        continue
+# collect jpeg files to process
+tags = [f for f in os.listdir(path_to_images) if f.endswith('.jpg')]
 
+# load images & process
+for tag in tqdm(tags, desc='Processing images'):
     # skip tags up to start_from. start_from = None to not skip any.
     if tag != start_from and start_from is not None:
         continue
@@ -195,6 +195,5 @@ for tag in os.listdir(path_to_images):
     if img_loaded is not None:
         processed = process_image(img_loaded)
         cv2.imwrite(os.path.join(results_dir, tag), processed)
-        # print('Successfully processed ' + tag + '!')
     else:
-        print(tag + " failed to load.")
+        tqdm.write(tag + " failed to load.")

@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import cv2
+from tqdm import tqdm
 
 
 class Criminisi_Inpainter():
@@ -44,40 +45,45 @@ class Criminisi_Inpainter():
 
         start_time = time.time()
         c = 0
+        total = int(np.sum(self.mask))
+
         # loop until whole region is filled
-        while True:
-            # get fill front
-            self._find_front()
+        with tqdm(total=total, desc='Inpainting', unit='px') as pbar:
+            while True:
+                # get fill front
+                self._find_front()
 
-            if self.show_progress:
-                name = 'Results/working_image_' + str(c) + '.png'
-                cv2.imwrite(name, self.working_image)
+                if self.show_progress:
+                    name = 'Results/working_image_' + str(c) + '.png'
+                    cv2.imwrite(name, self.working_image)
 
-            self._update_priorities()
+                self._update_priorities()
 
-            # target pixel == highest priority
-            target_pixel = self._find_highest_priority_pixel()
+                # target pixel == highest priority
+                target_pixel = self._find_highest_priority_pixel()
 
-            find_start_time = time.time()
-            source_patch = self._find_source_patch(target_pixel)
+                find_start_time = time.time()
+                source_patch = self._find_source_patch(target_pixel)
 
-            if self.verbose:
-                print('Time to find best: %.2f seconds' %
-                      (time.time()-find_start_time))
+                if self.verbose:
+                    print('Time to find best: %.2f seconds' %
+                          (time.time()-find_start_time))
 
-            self._update_image(target_pixel, source_patch)
+                self._update_image(target_pixel, source_patch)
 
-            # keep track of how much region left to fill
-            remaining = np.sum(self.working_mask)
-            total = np.sum(self.mask)
-            if self.verbose:
-                print('%d of %d completed' % (total-remaining, total))
+                # keep track of how much region left to fill
+                remaining = int(np.sum(self.working_mask))
+                filled_this_iter = total - remaining - (total - int(np.sum(self.mask)) - pbar.n)
+                pbar.update(total - remaining - pbar.n)
 
-            # break and end if region filled
-            if remaining == 0:
-                break
+                if self.verbose:
+                    tqdm.write('%d of %d completed' % (total - remaining, total))
 
-            c += 1
+                # break and end if region filled
+                if remaining == 0:
+                    break
+
+                c += 1
 
         if self.verbose:
             print('Inpainting took %.2f seconds to complete' %
