@@ -155,13 +155,13 @@ def process_image(image):
     lightness_ch, a, b = cv2.split(lab_image)
 
     # hist eq on lightness channel
-    tile_size = 4
-    clahe = cv2.createCLAHE(clipLimit=3,  # best between 2.3-3.2
+    tile_size = 8
+    clahe = cv2.createCLAHE(clipLimit=1.5,  # best between 2.3-3.2
                             tileGridSize=(tile_size, tile_size))
     lightness_ch = clahe.apply(lightness_ch)
 
-    # gamma correction
-    gamma = 0.7
+    # gamma correction (unused as doesnt improve results)
+    gamma = 1.0
     lightness_ch = np.clip(
         np.power(lightness_ch / 255.0, gamma) * 255.0, 0, 255
     ).astype(np.uint8)
