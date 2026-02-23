@@ -6,7 +6,25 @@
 
 This repo implements exemplar-based inpainting (Criminisi 2004) on chest x-ray images using OpenCV and NumPy. A small classifier demo and a sample dataset are included under `image_processing_files/`.
 
-> Project received 67% (2:1 classification)
+## Feedback
+Project received **67/100** (2:1 classification)
+1) Accuracy 92% - 16/20
+2) Visual quality - 14/20. Categories:
+  - −2 pts: Though noise removal has been done to some extent, the images still contain some noise.
+  - −4 pts: Significant amounts of unwanted artefacts have been introduced as part of the processing applied to the images.
+  - -0 pts: The contrast, brightness and the colours are visually plausible.
+  - -0 pts: The images have been successfully dewarped, as visually judged by a human observer.
+3) Code quality - 5/5
+  - Code is sufficiently commented / documented.
+  - The code is structured well and it is clear how different tasks are performed.
+4) Report - 20/30
+  - -0 pts: The report outlines and describes the proposed solution.
+  - -3 pts: The report is not structured very clearly. There are no sections and subsections and this makes following the report a bit difficult.
+  - -7 pts: The analysis of the results is not thorough enough. Including numerical evaluations and analyses in the form of tables, diagrams, histograms, etc. would have improved the quality of the report.
+5) Advanced credit - 10/20
+  - Credit given for the use of contours.
+  - Credit given for the way inpainting part of the solution is handled.
+
 
 ## Project structure
 
@@ -54,7 +72,7 @@ Output images are written to `Results/` with the same filenames as inputs.
 There’s a simple classifier example you can run on the sample images using the included ONNX model and OpenCV’s DNN module:
 
 ```bash
-python3 image_processing_files/classify.py --data image_processing_files/xray_images --model image_processing_files/classifier.model
+python3 image_processing_files/classify.py --data best_results --model image_processing_files/classifier.model
 ```
 
 It will print a predicted label per image and a final accuracy (first 50 images are labelled healthy, next 50 pneumonia).
