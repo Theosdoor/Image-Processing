@@ -103,33 +103,37 @@ def inpaint_image(image, patch_size=9, dilation_size=4):
     return inpainter.inpaint()
 
 
-def filter_noise(image):
+def filter_noise(image, median_ksize=3, nlm_h=7, apply_sharpening=True):
     """Remove noise from X-ray image.
 
     Args:
         image: Input BGR image.
+        median_ksize: Kernel size for median blur (must be odd).
+        nlm_h: Filter strength for the NLM luminance channel.
+        apply_sharpening: Whether to apply Laplacian edge sharpening.
 
     Returns:
         Denoised image.
     """
     # Remove salt & pepper with median filter
-    image = cv2.medianBlur(image, 3)
+    image = cv2.medianBlur(image, median_ksize)
 
     # NL means (converts to LAB for filtering)
     # h corresponds to filter strength in L channel
     # hColor corresponds to filter strength in A and B channels
     image = cv2.fastNlMeansDenoisingColored(
-        image, None, h=7, hColor=1,
+        image, None, h=nlm_h, hColor=1,
         templateWindowSize=9, searchWindowSize=31)
 
-    # Sharpen edges
-    lap_kernel = np.array([
-        [0, 1, 0],
-        [1, -4, 1],
-        [0, 1, 0]
-    ])
-    laplacian = cv2.filter2D(image, cv2.CV_8U, lap_kernel)
-    image = cv2.subtract(image, laplacian)
+    if apply_sharpening:
+        # Sharpen edges
+        lap_kernel = np.array([
+            [0, 1, 0],
+            [1, -4, 1],
+            [0, 1, 0]
+        ])
+        laplacian = cv2.filter2D(image, cv2.CV_8U, lap_kernel)
+        image = cv2.subtract(image, laplacian)
 
     return image
 
@@ -168,39 +172,52 @@ def adjust_color_contrast(image, gamma=1.0, clahe_clip_limit=1.5, tile_grid_size
 
 def process_image(
     image,
+    apply_perspective=True,
     corner_quality=0.01,
     border_width=4,
+    apply_inpainting=True,
     patch_size=9,
     dilation_size=4,
+    median_ksize=3,
+    nlm_h=7,
+    apply_sharpening=True,
+    apply_colour_contrast=True,
     gamma=1.0,
     clahe_clip_limit=1.5,
     tile_grid_size=8,
-    apply_colour_contrast=True,
 ):
-    """Process X-ray image through up to 4 stages.
+    """Process X-ray image through up to 4 stages, each individually optional.
 
-    Runs through: perspective correction, inpainting, noise filtering,
-    and (optionally) color/contrast adjustment. Keeps same resolution.
+    Stages: perspective correction, inpainting, noise filtering,
+    colour/contrast adjustment.
 
     Args:
         image: Input BGR image.
+        apply_perspective: Whether to run perspective correction.
         corner_quality: Quality threshold for Shi-Tomasi corner detection.
         border_width: Border size (pixels) for perspective correction.
+        apply_inpainting: Whether to run Criminisi inpainting.
         patch_size: Patch size for Criminisi inpainting.
         dilation_size: Dilation kernel size for inpainting mask.
+        median_ksize: Kernel size for median blur (must be odd).
+        nlm_h: NLM luminance filter strength.
+        apply_sharpening: Whether to apply Laplacian edge sharpening.
+        apply_colour_contrast: Whether to run the colour/contrast stage.
         gamma: Gamma correction value for contrast adjustment.
         clahe_clip_limit: CLAHE clip limit.
         tile_grid_size: CLAHE tile grid size.
-        apply_colour_contrast: Whether to run the colour/contrast stage.
 
     Returns:
         Processed image.
     """
-    image = fix_perspective(image, corner_quality=corner_quality,
-                            border_width=border_width)
-    image = inpaint_image(image, patch_size=patch_size,
-                          dilation_size=dilation_size)
-    image = filter_noise(image)
+    if apply_perspective:
+        image = fix_perspective(image, corner_quality=corner_quality,
+                                border_width=border_width)
+    if apply_inpainting:
+        image = inpaint_image(image, patch_size=patch_size,
+                              dilation_size=dilation_size)
+    image = filter_noise(image, median_ksize=median_ksize, nlm_h=nlm_h,
+                         apply_sharpening=apply_sharpening)
     if apply_colour_contrast:
         image = adjust_color_contrast(image, gamma=gamma,
                                       clahe_clip_limit=clahe_clip_limit,

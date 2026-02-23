@@ -4,15 +4,36 @@ metric:
   name: accuracy
   goal: maximize
 parameters:
+  # Stage toggles (most impactful based on ablation)
+  apply_perspective:
+    values: [true, false]
+  apply_inpainting:
+    values: [true, false]
+  apply_colour_contrast:
+    values: [true, false]
+
+  # Noise filter (biggest accuracy contributor: +10%)
+  median_ksize:
+    values: [3, 5, 7]
+  nlm_h:
+    values: [3, 5, 7, 10, 15]
+  apply_sharpening:
+    values: [true, false]
+
+  # Perspective correction (only sampled when apply_perspective=true)
   corner_quality:
     min: 0.01
     max: 0.1
   border_width:
     values: [0, 2, 4]
+
+  # Inpainting (only sampled when apply_inpainting=true)
   patch_size:
     values: [7, 9, 11]
   dilation_size:
     values: [3, 4, 5]
+
+  # Colour/contrast (only sampled when apply_colour_contrast=true)
   gamma:
     min: 0.7
     max: 1.0
@@ -21,5 +42,3 @@ parameters:
     max: 4.0
   tile_grid_size:
     values: [4, 8, 16]
-  apply_colour_contrast:
-    values: [true, false]

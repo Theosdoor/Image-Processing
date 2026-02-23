@@ -37,14 +37,19 @@ def run_pipeline():
 
                 processed = process_image(
                     img,
+                    apply_perspective=cfg.apply_perspective,
                     corner_quality=cfg.corner_quality,
                     border_width=cfg.border_width,
+                    apply_inpainting=cfg.apply_inpainting,
                     patch_size=cfg.patch_size,
                     dilation_size=cfg.dilation_size,
+                    median_ksize=cfg.median_ksize,
+                    nlm_h=cfg.nlm_h,
+                    apply_sharpening=cfg.apply_sharpening,
+                    apply_colour_contrast=cfg.apply_colour_contrast,
                     gamma=cfg.gamma,
                     clahe_clip_limit=cfg.clahe_clip_limit,
                     tile_grid_size=cfg.tile_grid_size,
-                    apply_colour_contrast=cfg.apply_colour_contrast,
                 )
                 cv2.imwrite(os.path.join(tmp_dir, tag), processed)
 

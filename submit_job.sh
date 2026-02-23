@@ -45,4 +45,4 @@ echo "Launching agent for sweep: $SWEEP_ID"
 echo "------------------------------------------------------"
 
 # Run up to 50 trials; increase --count or remove it to run indefinitely
-wandb agent --entity "$WANDB_ENTITY" --project "$WANDB_PROJECT" --count 50 "$SWEEP_ID"
+wandb agent --entity "$WANDB_ENTITY" --project "$WANDB_PROJECT" "$SWEEP_ID"
