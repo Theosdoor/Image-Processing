@@ -34,7 +34,7 @@ parser.add_argument(
     "--data",
     type=str,
     help="specify path to the images",
-    default=os.path.join(project_root, 'results'))
+    default=os.path.join(project_root, 'xray_images'))
 
 parser.add_argument(
     "--model",

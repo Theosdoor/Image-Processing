@@ -54,7 +54,14 @@ uv sync
 
 ## Usage Guide
 
-**Quick start**
+**Quick start – run full pipeline**
+```bash
+./run_pipeline.sh
+```
+
+This runs the complete pipeline: image inpainting followed by classification of the processed images, and outputs the final accuracy.
+
+**Process images only**
 ```bash
 python3 scripts/main.py
 ```
