@@ -6,16 +6,17 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-from criminisi_inpainter import Criminisi_Inpainter
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.criminisi_inpainter import Criminisi_Inpainter
 
 try:
     path_to_images = sys.argv[1]  # path given as command line argument
 except IndexError:
     # default path
-    path_to_images = 'image_processing_files/xray_images'
+    path_to_images = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'xray_images')
 
 # global variables
-results_dir = 'Results'
+results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'results')
 
 # create results directory if doesnt already exist
 if not os.path.isdir(results_dir):

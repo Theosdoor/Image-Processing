@@ -27,17 +27,20 @@ import cv2
 parser = argparse.ArgumentParser(
     description='Perform image classification on x-ray images!')
 
+# Get the project root directory
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 parser.add_argument(
     "--data",
     type=str,
     help="specify path to the images",
-    default='xray_images')
+    default=os.path.join(project_root, 'results'))
 
 parser.add_argument(
     "--model",
     type=str,
     help="specify path to model weights",
-    default='classifier.model')
+    default=os.path.join(project_root, 'models', 'classifier.model'))
 
 args = parser.parse_args()
 

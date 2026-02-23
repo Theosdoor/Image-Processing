@@ -28,13 +28,15 @@ Project received **67/100** (2:1 classification)
 
 ## Project structure
 
-- `main.py` — runs the inpainting pipeline over a folder of images.
-- `criminisi_inpainter.py` — core Criminisi inpainting implementation (OpenCV-based).
-- `Results/` — output folder for processed images (auto-created if missing).
-- `image_processing_files/` — sample test assets:
-  - `xray_images/` — 100 sample images (first 50 healthy, next 50 pneumonia).
+- `scripts/`
+  - `main.py` — runs the inpainting pipeline over a folder of images.
   - `classify.py` — optional classifier demo using OpenCV DNN.
+- `src/`
+  - `criminisi_inpainter.py` — core Criminisi inpainting implementation (OpenCV-based).
+- `models/` — classifier model
   - `classifier.model` — ONNX weights for the classifier demo.
+- `xray_images/` — 100 sample images (first 50 healthy, next 50 pneumonia).
+- `results/` — output folder for processed images (auto-created if missing).
 
 ## Installation
 
@@ -54,16 +56,16 @@ uv sync
 
 **Quick start**
 ```bash
-python3 main.py
+python3 scripts/main.py
 ```
 
-By default, the images inside `image_processing_files/xray_images` are processed. To specify a different directory of images, from the project root run:
+By default, the images inside `xray_images` are processed. To specify a different directory of images, from the project root run:
 
 ```bash
-python3 main.py <path_to_images>
+python3 scripts/main.py <path_to_images>
 ```
 
-Output images are written to `Results/` with the same filenames as inputs.
+Output images are written to `results/` with the same filenames as inputs.
 
 - Performance: inpainting is patch-based and can be slow on large images. Consider downscaling inputs or reducing `patch_size` for quicker runs.
 
@@ -72,18 +74,18 @@ Output images are written to `Results/` with the same filenames as inputs.
 There’s a simple classifier example you can run on the sample images using the included ONNX model and OpenCV’s DNN module:
 
 ```bash
-python3 image_processing_files/classify.py --data best_results --model image_processing_files/classifier.model
+python3 scripts/classify.py --data best_results
 ```
 
 It will print a predicted label per image and a final accuracy (first 50 images are labelled healthy, next 50 pneumonia).
 
 ### Runtime options
 
-- Start partway through a directory: set the `start_from` variable near the bottom of `nb_main.py` to the desired starting filename (e.g., "im044-healthy.jpg"). Set to `None` to process all files.
+- Start partway through a directory: set the `start_from` variable near the bottom of `scripts/main.py` to the desired starting filename (e.g., "im044-healthy.jpg"). Set to `None` to process all files.
 - Inpainter options (see `criminisi_inpainter.py` constructor):
   - `patch_size` (default 9)
   - `verbose=True|False` — print timing/progress for inpainting.
-  - `show_progress=True|False` — save intermediate working images into `Results/` each iteration.
+  - `show_progress=True|False` — save intermediate working images into `results/` each iteration.
 
 ## References
 
