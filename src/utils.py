@@ -64,11 +64,13 @@ def fix_perspective(image, corner_quality=0.01, border_width=4):
 
 
 
-def inpaint_image(image):
+def inpaint_image(image, patch_size=9, dilation_size=4):
     """Inpaint missing regions in X-ray image.
 
     Args:
         image: Input BGR image with missing regions (black pixels).
+        patch_size: Patch size for Criminisi inpainting.
+        dilation_size: Size of the square dilation kernel applied to the mask.
 
     Returns:
         Inpainted image.
@@ -90,14 +92,14 @@ def inpaint_image(image):
     # Dilate mask to expand missing region
     # (this overlaps region to be inpainted with known region,
     # so more seamless inpainting)
-    dilation_kernel = np.ones((4, 3), np.uint8)
+    dilation_kernel = np.ones((dilation_size, dilation_size), np.uint8)
     inpainting_mask = cv2.dilate(
         inpainting_mask, dilation_kernel, iterations=1)
 
     # Turn into binary mask
     inpainting_mask[inpainting_mask > 0] = 1
 
-    inpainter = Criminisi_Inpainter(image, inpainting_mask, patch_size=9)
+    inpainter = Criminisi_Inpainter(image, inpainting_mask, patch_size=patch_size)
     return inpainter.inpaint()
 
 
@@ -132,11 +134,14 @@ def filter_noise(image):
     return image
 
 
-def adjust_color_contrast(image):
+def adjust_color_contrast(image, gamma=1.0, clahe_clip_limit=1.5, tile_grid_size=8):
     """Adjust color and contrast of X-ray image.
 
     Args:
         image: Input BGR image.
+        gamma: Gamma correction value applied to the L channel.
+        clahe_clip_limit: Clip limit for CLAHE histogram equalisation.
+        tile_grid_size: Tile grid size for CLAHE.
 
     Returns:
         Color and contrast adjusted image.
@@ -147,13 +152,11 @@ def adjust_color_contrast(image):
     lightness_ch, a, b = cv2.split(lab_image)
 
     # Histogram equalization on lightness channel
-    tile_size = 8
-    clahe = cv2.createCLAHE(clipLimit=1.5,  # best between 2.3-3.2
-                            tileGridSize=(tile_size, tile_size))
+    clahe = cv2.createCLAHE(clipLimit=clahe_clip_limit,
+                            tileGridSize=(tile_grid_size, tile_grid_size))
     lightness_ch = clahe.apply(lightness_ch)
 
-    # Gamma correction (unused as doesn't improve results)
-    gamma = 1.0
+    # Gamma correction
     lightness_ch = np.clip(
         np.power(lightness_ch / 255.0, gamma) * 255.0, 0, 255
     ).astype(np.uint8)
@@ -163,22 +166,45 @@ def adjust_color_contrast(image):
     return cv2.cvtColor(lab_image, cv2.COLOR_LAB2BGR)
 
 
-def process_image(image):
-    """Process X-ray image through 4 stages.
+def process_image(
+    image,
+    corner_quality=0.01,
+    border_width=4,
+    patch_size=9,
+    dilation_size=4,
+    gamma=1.0,
+    clahe_clip_limit=1.5,
+    tile_grid_size=8,
+    apply_colour_contrast=True,
+):
+    """Process X-ray image through up to 4 stages.
 
     Runs through: perspective correction, inpainting, noise filtering,
-    and color/contrast adjustment. Keeps same resolution.
+    and (optionally) color/contrast adjustment. Keeps same resolution.
 
     Args:
         image: Input BGR image.
+        corner_quality: Quality threshold for Shi-Tomasi corner detection.
+        border_width: Border size (pixels) for perspective correction.
+        patch_size: Patch size for Criminisi inpainting.
+        dilation_size: Dilation kernel size for inpainting mask.
+        gamma: Gamma correction value for contrast adjustment.
+        clahe_clip_limit: CLAHE clip limit.
+        tile_grid_size: CLAHE tile grid size.
+        apply_colour_contrast: Whether to run the colour/contrast stage.
 
     Returns:
         Processed image.
     """
-    image = fix_perspective(image)
-    image = inpaint_image(image)
+    image = fix_perspective(image, corner_quality=corner_quality,
+                            border_width=border_width)
+    image = inpaint_image(image, patch_size=patch_size,
+                          dilation_size=dilation_size)
     image = filter_noise(image)
-    image = adjust_color_contrast(image)
+    if apply_colour_contrast:
+        image = adjust_color_contrast(image, gamma=gamma,
+                                      clahe_clip_limit=clahe_clip_limit,
+                                      tile_grid_size=tile_grid_size)
     return image
 
 
